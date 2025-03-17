@@ -3,12 +3,26 @@
 Cognitive Workload Assessment and Prediction Tool
 
 This module implements a machine learning pipeline for predicting cognitive workload
-based on physiological, EEG, and gaze data. The tool preprocesses multi-modal data,
-trains a Random Forest classifier, and provides prediction functionality.
+based on physiological, EEG, and gaze data. The tool supports multiple machine learning
+models including Random Forest, SVM, Neural Networks, and more.
 
-Usage:
-    python cwt.py train
-    python cwt.py predict [input_data_path]
+Available commands:
+    train       - Train a new model
+    predict     - Make predictions with a trained model
+    list-models - List available trained models
+
+Example usage:
+    python cwt.py train --model-type rf
+    python cwt.py predict --input input_data.json
+    python cwt.py list-models
+
+Available model types:
+    rf  - Random Forest
+    svm - Support Vector Machine
+    gb  - Gradient Boosting
+    mlp - Neural Network (MLP)
+    knn - K-Nearest Neighbors
+    lr  - Logistic Regression
 """
 
 import os
@@ -23,10 +37,14 @@ import pandas as pd
 import numpy as np
 import joblib
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, GridSearchCV
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
@@ -76,16 +94,28 @@ logger.debug(f"Gaze data file path: {DATA_FILES['gaze']}")
 MODEL_OUTPUT_DIR = os.getenv('MODEL_OUTPUT_DIR', 'models')
 MODEL_NAME = os.getenv('MODEL_NAME', 'Cognitive_State_Prediction_Model')
 MODEL_VERSION = datetime.now().strftime("%Y%m%d_%H%M%S")
-MODEL_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"{MODEL_NAME}_{MODEL_VERSION}.joblib")
-SCALER_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"scaler_{MODEL_VERSION}.joblib")
-METADATA_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"metadata_{MODEL_VERSION}.json")
+
+# Default model type (can be overridden by command line)
+DEFAULT_MODEL_TYPE = os.getenv('DEFAULT_MODEL_TYPE', 'rf')
+
+# Dictionary of available models
+AVAILABLE_MODELS = {
+    'rf': 'Random Forest',
+    'svm': 'Support Vector Machine',
+    'gb': 'Gradient Boosting',
+    'mlp': 'Neural Network (MLP)',
+    'knn': 'K-Nearest Neighbors',
+    'lr': 'Logistic Regression'
+}
 
 # Training parameters
 TEST_SIZE = float(os.getenv('TEST_SIZE', 0.2))
 RANDOM_SEED = int(os.getenv('RANDOM_SEED', 42))
 
-# Ensure model directory exists
-os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+# Output file paths
+MODEL_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"{MODEL_NAME}_{MODEL_VERSION}.joblib")
+SCALER_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"scaler_{MODEL_VERSION}.joblib")
+METADATA_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"metadata_{MODEL_VERSION}.json")
 
 # ---------------------- HELPER FUNCTIONS ---------------------- #
 def validate_file_exists(file_path):
@@ -107,10 +137,12 @@ def safe_read_csv(file_path):
         logger.error(f"Error reading file {file_path}: {str(e)}")
         raise
 
-def save_model_metadata(model, features, accuracy, class_report):
+def save_model_metadata(model, model_type, features, accuracy, class_report):
     """Save metadata about the model for reproducibility."""
     metadata = {
         "model_version": MODEL_VERSION,
+        "model_type": model_type,
+        "model_name": AVAILABLE_MODELS.get(model_type, "Unknown"),
         "training_date": datetime.now().isoformat(),
         "accuracy": float(accuracy),
         "classification_report": class_report,
@@ -260,19 +292,91 @@ def preprocess_data(df_physio, df_eeg, df_gaze):
         logger.error(f"Error during preprocessing: {str(e)}")
         raise
 
-# ---------------------- MODEL TRAINING ---------------------- #
-def train_model(df, features):
+# ---------------------- MODEL CREATION ---------------------- #
+def create_model(model_type='rf'):
     """
-    Train a Random Forest classifier for cognitive state prediction.
+    Create a machine learning model based on the specified type.
+    
+    Args:
+        model_type (str): Type of model to create ('rf', 'svm', 'gb', 'mlp', 'knn', 'lr')
+        
+    Returns:
+        object: Initialized model
+    """
+    logger.info(f"Creating model of type: {model_type} ({AVAILABLE_MODELS.get(model_type, 'Unknown')})")
+    
+    if model_type == 'rf':
+        # Random Forest
+        return RandomForestClassifier(
+            n_estimators=100,
+            max_depth=None,
+            random_state=RANDOM_SEED
+        )
+    
+    elif model_type == 'svm':
+        # Support Vector Machine
+        return SVC(
+            C=1.0,
+            kernel='rbf',
+            probability=True,
+            random_state=RANDOM_SEED
+        )
+    
+    elif model_type == 'gb':
+        # Gradient Boosting
+        return GradientBoostingClassifier(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=3,
+            random_state=RANDOM_SEED
+        )
+    
+    elif model_type == 'mlp':
+        # Neural Network (MLP)
+        return MLPClassifier(
+            hidden_layer_sizes=(100,),
+            activation='relu',
+            solver='adam',
+            max_iter=300,
+            random_state=RANDOM_SEED
+        )
+    
+    elif model_type == 'knn':
+        # K-Nearest Neighbors
+        return KNeighborsClassifier(
+            n_neighbors=5,
+            weights='distance'
+        )
+    
+    elif model_type == 'lr':
+        # Logistic Regression
+        return LogisticRegression(
+            C=1.0,
+            max_iter=100,
+            random_state=RANDOM_SEED
+        )
+    
+    else:
+        logger.warning(f"Unknown model type: {model_type}. Defaulting to Random Forest.")
+        return RandomForestClassifier(
+            n_estimators=100,
+            random_state=RANDOM_SEED
+        )
+
+# ---------------------- MODEL TRAINING ---------------------- #
+def train_model(df, features, model_type='rf'):
+    """
+    Train a machine learning model for cognitive state prediction.
     
     Args:
         df (DataFrame): Preprocessed data with features and target
         features (list): List of feature names
+        model_type (str): Type of model to train
         
     Returns:
-        object: Trained RandomForestClassifier model
+        tuple: (trained_model, accuracy, X_test, y_test, y_pred)
     """
-    logger.info("Training model...")
+    logger.info(f"Training model of type: {model_type}")
     
     try:
         X = df.drop(columns=["cognitive_state", "workload_intensity"])
@@ -283,9 +387,8 @@ def train_model(df, features):
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_SEED)
         
-        # Train model
-        logger.debug("Training Random Forest Classifier")
-        model = RandomForestClassifier(n_estimators=100, random_state=RANDOM_SEED)
+        # Create and train model
+        model = create_model(model_type)
         
         # Perform cross-validation
         logger.debug("Performing 5-fold cross-validation")
@@ -294,6 +397,7 @@ def train_model(df, features):
         logger.info(f"Mean CV accuracy: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}")
         
         # Fit the model on the full training data
+        logger.info("Fitting model on training data")
         model.fit(X_train, y_train)
         
         # Evaluate on test set
@@ -309,17 +413,18 @@ def train_model(df, features):
         cm_path = os.path.join(MODEL_OUTPUT_DIR, f"confusion_matrix_{MODEL_VERSION}.png")
         plot_confusion_matrix(y_test, y_pred, cm_path)
         
-        # Plot and save feature importance
-        logger.debug("Generating feature importance plot")
-        fi_path = os.path.join(MODEL_OUTPUT_DIR, f"feature_importance_{MODEL_VERSION}.png")
-        plot_feature_importance(model, X.columns, fi_path)
+        # Plot and save feature importance if model supports it
+        if hasattr(model, 'feature_importances_'):
+            logger.debug("Generating feature importance plot")
+            fi_path = os.path.join(MODEL_OUTPUT_DIR, f"feature_importance_{MODEL_VERSION}.png")
+            plot_feature_importance(model, X.columns, fi_path)
         
         # Save model, scaler, and metadata
         logger.info(f"Saving model to {MODEL_OUTPUT_PATH}")
         joblib.dump(model, MODEL_OUTPUT_PATH)
         
         # Save metadata
-        save_model_metadata(model, list(X.columns), accuracy, class_report)
+        save_model_metadata(model, model_type, list(X.columns), accuracy, class_report)
         
         return model, accuracy, X_test, y_test, y_pred
     
@@ -338,7 +443,7 @@ def predict_new_data(model_path, scaler_path, new_data):
         new_data (dict): Dictionary containing feature values
         
     Returns:
-        str: Predicted cognitive state
+        tuple: (predicted_cognitive_state, class_probabilities)
     """
     try:
         logger.info(f"Loading model from {model_path}")
@@ -346,6 +451,21 @@ def predict_new_data(model_path, scaler_path, new_data):
         
         logger.info(f"Loading scaler from {scaler_path}")
         scaler = joblib.load(scaler_path)
+        
+        # Try to load metadata to determine model type
+        try:
+            metadata_path = model_path.replace('.joblib', '.metadata.json')
+            if os.path.exists(metadata_path):
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                model_type = metadata.get('model_type', 'unknown')
+                logger.info(f"Model type from metadata: {model_type}")
+            else:
+                model_type = "unknown"
+                logger.info("No metadata found, model type unknown")
+        except Exception as e:
+            logger.warning(f"Could not determine model type from metadata: {str(e)}")
+            model_type = "unknown"
         
         # Convert input to DataFrame
         logger.debug("Preparing input data for prediction")
@@ -357,11 +477,15 @@ def predict_new_data(model_path, scaler_path, new_data):
         # Make prediction
         logger.debug("Making prediction")
         prediction = model.predict(new_data_scaled)
-        prediction_proba = model.predict_proba(new_data_scaled)
         
-        # Get class probabilities
-        classes = model.classes_
-        proba_dict = {cls: float(prob) for cls, prob in zip(classes, prediction_proba[0])}
+        # Get class probabilities if model supports it
+        if hasattr(model, 'predict_proba'):
+            prediction_proba = model.predict_proba(new_data_scaled)
+            classes = model.classes_
+            proba_dict = {str(cls): float(prob) for cls, prob in zip(classes, prediction_proba[0])}
+        else:
+            # For models that don't support probability
+            proba_dict = {"prediction_confidence": 1.0}
         
         logger.info(f"Prediction: {prediction[0]}")
         logger.debug(f"Class probabilities: {proba_dict}")
@@ -380,6 +504,9 @@ def parse_args():
     
     # Train command
     train_parser = subparsers.add_parser('train', help='Train a new model')
+    train_parser.add_argument('--model-type', '-m', type=str, default=DEFAULT_MODEL_TYPE,
+                             choices=list(AVAILABLE_MODELS.keys()),
+                             help=f'Type of model to train (one of: {", ".join(AVAILABLE_MODELS.keys())})')
     
     # Predict command
     predict_parser = subparsers.add_parser('predict', help='Make predictions with a trained model')
@@ -448,21 +575,60 @@ def find_latest_model():
 def list_available_models():
     """List all available trained models."""
     models_path = Path(MODEL_OUTPUT_DIR)
+    
+    # Ensure models directory exists
+    os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+    
+    # Find all model files
     model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
     
     if not model_files:
+        print("\nNo trained models found.")
+        print("Train a model first with:")
+        print("  python cwt.py train --model-type MODEL_TYPE")
         logger.info("No trained models found")
         return
     
     print("\nAvailable trained models:")
-    print("-" * 80)
-    print(f"{'Model Name':<50} {'Creation Date':<20} {'Size (KB)':<10}")
-    print("-" * 80)
+    print("-" * 100)
+    print(f"{'Model Name':<50} {'Model Type':<15} {'Accuracy':<10} {'Creation Date':<20} {'Size (KB)':<10}")
+    print("-" * 100)
     
     for model_file in sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True):
         creation_time = datetime.fromtimestamp(model_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         size_kb = model_file.stat().st_size / 1024
-        print(f"{model_file.name:<50} {creation_time:<20} {size_kb:.2f}")
+        
+        # Try to get model type and accuracy from metadata
+        model_type = "Unknown"
+        accuracy = "N/A"
+        
+        try:
+            # Extract version from filename
+            parts = model_file.stem.split('_')
+            if len(parts) >= 5:
+                model_version = f"{parts[-2]}_{parts[-1]}"
+                metadata_file = models_path / f"metadata_{model_version}.json"
+                
+                if metadata_file.exists():
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
+                    model_type = metadata.get('model_name', "Unknown")
+                    accuracy = f"{float(metadata.get('accuracy', 0)):.3f}"
+        except Exception as e:
+            logger.warning(f"Error reading metadata for {model_file.name}: {str(e)}")
+        
+        print(f"{model_file.name:<50} {model_type:<15} {accuracy:<10} {creation_time:<20} {size_kb:.2f}")
+    
+    print("\nEXAMPLE COMMANDS:")
+    print("\nTo use a model for prediction:")
+    print("  python cwt.py predict --input YOUR_DATA.json")
+    print("  python cwt.py predict --input YOUR_DATA.json --model PATH_TO_MODEL --scaler PATH_TO_SCALER")
+    print("\nTo train a new model:")
+    for model_key, model_name in AVAILABLE_MODELS.items():
+        print(f"  python cwt.py train --model-type {model_key}")
+    print("\nAvailable model types:")
+    for model_key, model_name in AVAILABLE_MODELS.items():
+        print(f"  {model_key} - {model_name}")
 
 # ---------------------- MAIN EXECUTION ---------------------- #
 def main():
@@ -471,6 +637,11 @@ def main():
     
     if args.command == 'train':
         logger.info("Starting model training pipeline")
+        
+        # Get model type from arguments
+        model_type = args.model_type
+        logger.info(f"Selected model type: {model_type} ({AVAILABLE_MODELS.get(model_type, 'Unknown')})")
+        
         try:
             # Check if data files exist before proceeding
             for data_type, file_path in DATA_FILES.items():
@@ -490,12 +661,25 @@ def main():
             joblib.dump(scaler, SCALER_OUTPUT_PATH)
             logger.info(f"Scaler saved to {SCALER_OUTPUT_PATH}")
             
-            # Train model
-            model, accuracy, X_test, y_test, y_pred = train_model(df_processed, features)
+            # Train model with specified type
+            model, accuracy, X_test, y_test, y_pred = train_model(df_processed, features, model_type)
             
             logger.info(f"Model training complete. Accuracy: {accuracy:.3f}")
             logger.info(f"Model saved at {MODEL_OUTPUT_PATH}")
             logger.info(f"Scaler saved at {SCALER_OUTPUT_PATH}")
+            
+            # Print summary to console
+            print("\n" + "="*60)
+            print(f"MODEL TRAINING SUCCESSFULLY COMPLETED")
+            print("="*60)
+            print(f"Model Type: {AVAILABLE_MODELS.get(model_type, 'Unknown')}")
+            print(f"Accuracy:   {accuracy:.3f}")
+            print(f"Model Path: {MODEL_OUTPUT_PATH}")
+            print(f"Scaler Path: {SCALER_OUTPUT_PATH}")
+            
+            print("\nTo make predictions with this model, run:")
+            print(f"  python cwt.py predict --input YOUR_DATA.json")
+            print("="*60)
             
         except Exception as e:
             logger.error(f"Training pipeline failed: {str(e)}")
