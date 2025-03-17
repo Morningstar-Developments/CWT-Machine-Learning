@@ -62,8 +62,8 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
-from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, precision_recall_curve, roc_curve, auc
+from sklearn.model_selection import cross_val_score, GridSearchCV, StratifiedKFold
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -71,6 +71,21 @@ import subprocess
 import pickle
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
+
+# Deep learning imports
+import torch
+from torch import nn, optim
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import xgboost as xgb
+
+# Hyperparameter optimization
+import optuna
+from optuna.integration import XGBoostPruningCallback
 
 import tqdm
 
@@ -368,7 +383,7 @@ def create_model(model_type='rf'):
     Create a machine learning model based on the specified type.
     
     Args:
-        model_type (str): Type of model to create ('rf', 'svm', 'gb', 'mlp', 'knn', 'lr')
+        model_type (str): Type of model to create ('rf', 'svm', 'gb', 'mlp', 'knn', 'lr', 'pytorch', 'xgb')
         
     Returns:
         object: Initialized model
@@ -426,6 +441,22 @@ def create_model(model_type='rf'):
             random_state=RANDOM_SEED
         )
     
+    elif model_type == 'pytorch':
+        # Return model type only - actual model will be created during training with correct input dimensions
+        return 'pytorch'
+    
+    elif model_type == 'xgb':
+        # XGBoost
+        return xgb.XGBClassifier(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=3,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            objective='multi:softprob',
+            random_state=RANDOM_SEED
+        )
+    
     else:
         logger.warning(f"Unknown model type: {model_type}. Defaulting to Random Forest.")
         return RandomForestClassifier(
@@ -453,31 +484,140 @@ def train_model(df, features, model_type='rf', scaler=None):
         X = df.drop(columns=["cognitive_state", "workload_intensity"])
         y = df["cognitive_state"]
         
+        # Convert categorical labels to numeric for PyTorch and XGBoost
+        label_encoder = None
+        if model_type in ['pytorch', 'xgb']:
+            label_encoder = LabelEncoder()
+            y = label_encoder.fit_transform(y)
+        
         # Split data
         logger.debug(f"Splitting data with test_size={TEST_SIZE}, random_state={RANDOM_SEED}")
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_SEED)
         
-        # Create and train model
-        model = create_model(model_type)
+        # Create model
+        if model_type == 'pytorch':
+            # For PyTorch models, we need another validation split for early stopping
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_train, y_train, test_size=0.2, stratify=y_train, random_state=RANDOM_SEED)
+            
+            # Find optimal hyperparameters with Optuna if enabled
+            if USE_HYPERPARAMETER_OPTIMIZATION:
+                model_params = optimize_pytorch_hyperparameters(X_train, y_train, X_val, y_val)
+            else:
+                model_params = {
+                    'hidden_dims': [128, 64, 32],
+                    'dropout_rate': 0.3,
+                    'learning_rate': 0.001,
+                    'batch_size': 32
+                }
+            
+            # Train PyTorch model
+            model, history = train_torch_model(
+                X_train, y_train, 
+                X_val, y_val, 
+                model_params=model_params,
+                num_epochs=100,
+                batch_size=model_params['batch_size'],
+                learning_rate=model_params['learning_rate']
+            )
+            
+            # Evaluate on test set
+            device = next(model.parameters()).device
+            X_test_tensor = torch.FloatTensor(X_test).to(device)
+            model.eval()
+            with torch.no_grad():
+                logits = model(X_test_tensor)
+                _, y_pred = torch.max(logits, 1)
+                y_pred = y_pred.cpu().numpy()
+            
+            # Plot training history
+            plt.figure(figsize=(12, 4))
+            plt.subplot(1, 2, 1)
+            plt.plot(history['train_loss'], label='Train Loss')
+            plt.plot(history['val_loss'], label='Validation Loss')
+            plt.title('Loss Curves')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            plt.legend()
+            
+            plt.subplot(1, 2, 2)
+            plt.plot(history['train_acc'], label='Train Accuracy')
+            plt.plot(history['val_acc'], label='Validation Accuracy')
+            plt.title('Accuracy Curves')
+            plt.xlabel('Epoch')
+            plt.ylabel('Accuracy')
+            plt.legend()
+            
+            plt.tight_layout()
+            plt.savefig(f'models/visualizations/pytorch_training_history.png')
+            plt.close()
         
-        # Perform cross-validation
-        logger.debug("Performing 5-fold cross-validation")
-        cv_scores = cross_val_score(model, X_train, y_train, cv=5)
-        logger.info(f"Cross-validation scores: {cv_scores}")
-        logger.info(f"Mean CV accuracy: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}")
+        elif model_type == 'xgb':
+            # For XGBoost, we use a separate validation set for early stopping
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_train, y_train, test_size=0.2, stratify=y_train, random_state=RANDOM_SEED)
+            
+            # Find optimal hyperparameters with Optuna if enabled
+            if USE_HYPERPARAMETER_OPTIMIZATION:
+                model = optimize_xgboost_hyperparameters(X_train, y_train, X_val, y_val)
+            else:
+                model = create_model(model_type)
+                # Train with early stopping
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    early_stopping_rounds=10,
+                    verbose=True
+                )
+            
+            # Predict on test set
+            y_pred = model.predict(X_test)
+            
+            # Plot feature importance
+            plt.figure(figsize=(10, 6))
+            xgb.plot_importance(model, max_num_features=20)
+            plt.title('XGBoost Feature Importance')
+            plt.tight_layout()
+            plt.savefig(f'models/visualizations/xgboost_feature_importance.png')
+            plt.close()
         
-        # Fit the model on the full training data
-        logger.info("Fitting model on training data")
-        model.fit(X_train, y_train)
+        else:
+            # Create and train traditional ML model
+            model = create_model(model_type)
+            
+            # Perform cross-validation
+            logger.debug("Performing 5-fold cross-validation")
+            cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+            logger.info(f"Cross-validation scores: {cv_scores}")
+            logger.info(f"Mean CV accuracy: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}")
+            
+            # Optionally use hyperparameter optimization
+            if USE_HYPERPARAMETER_OPTIMIZATION:
+                model = optimize_hyperparameters(model, model_type, X_train, y_train)
+            
+            # Fit the model on the full training data
+            logger.info("Fitting model on training data")
+            model.fit(X_train, y_train)
+            
+            # Predict on test set
+            y_pred = model.predict(X_test)
         
-        # Evaluate on test set
-        y_pred = model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        class_report = classification_report(y_test, y_pred, output_dict=True)
+        # Calculate accuracy and classification report
+        if model_type in ['pytorch', 'xgb'] and label_encoder is not None:
+            # Convert back to original labels for evaluation
+            accuracy = accuracy_score(y_test, y_pred)
+            class_report = classification_report(y_test, y_pred, output_dict=True)
+            # Convert numeric predictions back to original classes for display
+            y_test_original = label_encoder.inverse_transform(y_test)
+            y_pred_original = label_encoder.inverse_transform(y_pred)
+            logger.info(f"Classification Report:\n {classification_report(y_test_original, y_pred_original)}")
+        else:
+            accuracy = accuracy_score(y_test, y_pred)
+            class_report = classification_report(y_test, y_pred, output_dict=True)
+            logger.info(f"Classification Report:\n {classification_report(y_test, y_pred)}")
         
         logger.info(f"Model Accuracy: {accuracy:.3f}")
-        logger.info(f"Classification Report:\n {classification_report(y_test, y_pred)}")
         
         # Create visualization directory if it doesn't exist
         viz_dir = os.path.join('models', 'visualizations')
@@ -485,67 +625,80 @@ def train_model(df, features, model_type='rf', scaler=None):
         
         # Plot and save confusion matrix
         logger.debug("Generating confusion matrix")
-        cm_path = os.path.join(viz_dir, f"confusion_matrix_{MODEL_VERSION}.png")
+        cm_path = os.path.join(viz_dir, f"confusion_matrix_{model_type}_{MODEL_VERSION}.png")
         plot_confusion_matrix(y_test, y_pred, cm_path)
         
         # Plot and save feature importance if model supports it
         if hasattr(model, 'feature_importances_'):
             logger.debug("Generating feature importance plot")
-            fi_path = os.path.join(viz_dir, f"feature_importance_{MODEL_VERSION}.png")
+            fi_path = os.path.join(viz_dir, f"feature_importance_{model_type}_{MODEL_VERSION}.png")
             plot_feature_importance(model, X.columns, fi_path)
         
         # Determine the appropriate model directory based on model_type
         model_dir = os.path.join(MODEL_OUTPUT_DIR)
         if model_type in AVAILABLE_MODELS:
             # Override model_dir if explicitly using a model type to ensure it goes in the right subdirectory
-            model_type_dir = os.path.join('models', 'sample', model_type)
-            os.makedirs(model_type_dir, exist_ok=True)
-            model_dir = model_type_dir
+            model_dir = os.path.join(MODEL_OUTPUT_DIR, model_type)
         
-        # Set up model paths
-        model_filename = f"{MODEL_NAME}_{MODEL_VERSION}_{model_type}.joblib"
-        scaler_filename = f"scaler_{MODEL_VERSION}_{model_type}.joblib"
-        metadata_filename = f"metadata_{MODEL_VERSION}_{model_type}.json"
+        # Ensure model directory exists
+        os.makedirs(model_dir, exist_ok=True)
         
-        MODEL_OUTPUT_PATH = os.path.join(model_dir, model_filename)
-        SCALER_PATH = os.path.join(model_dir, scaler_filename)
-        METADATA_OUTPUT_PATH = os.path.join(model_dir, metadata_filename)
+        # Save the model
+        if model_type == 'pytorch':
+            # Save PyTorch model
+            model_path = os.path.join(model_dir, f"{model_type}_model_{MODEL_VERSION}.pt")
+            torch.save(model.state_dict(), model_path)
+            
+            # Save model architecture information
+            model_info = {
+                'input_dim': X.shape[1],
+                'hidden_dims': model_params['hidden_dims'],
+                'dropout_rate': model_params['dropout_rate'],
+                'num_classes': len(np.unique(y))
+            }
+            model_info_path = os.path.join(model_dir, f"{model_type}_architecture_{MODEL_VERSION}.json")
+            with open(model_info_path, 'w') as f:
+                json.dump(model_info, f, indent=2)
+        else:
+            # Save scikit-learn or XGBoost model
+            model_path = os.path.join(model_dir, f"{model_type}_model_{MODEL_VERSION}.joblib")
+            joblib.dump(model, model_path)
         
-        # Save model and scaler
-        logger.info(f"Saving model to {MODEL_OUTPUT_PATH}")
-        joblib.dump(model, MODEL_OUTPUT_PATH)
+        logger.info(f"Model saved to {model_path}")
         
-        # Create a new scaler if one wasn't provided
-        if scaler is None:
-            logger.warning("No scaler provided, creating a new one")
-            scaler = StandardScaler()
-            scaler.fit(df[features])
-            scaler.feature_names_in_ = np.array(features)
+        # Save scaler if provided
+        if scaler:
+            scaler_path = os.path.join(model_dir, f"{model_type}_scaler_{MODEL_VERSION}.joblib")
+            joblib.dump(scaler, scaler_path)
+            logger.info(f"Scaler saved to {scaler_path}")
         
-        logger.info(f"Saving scaler to {SCALER_PATH}")
-        joblib.dump(scaler, SCALER_PATH)
+        # Save label encoder for pytorch and xgboost models
+        if model_type in ['pytorch', 'xgb'] and label_encoder is not None:
+            encoder_path = os.path.join(model_dir, f"{model_type}_encoder_{MODEL_VERSION}.joblib")
+            joblib.dump(label_encoder, encoder_path)
+            logger.info(f"Label encoder saved to {encoder_path}")
         
         # Save metadata
+        metadata_path = os.path.join(model_dir, f"{model_type}_metadata_{MODEL_VERSION}.json")
         metadata = {
-            "model_version": MODEL_VERSION,
             "model_type": model_type,
-            "model_name": AVAILABLE_MODELS.get(model_type, "Unknown"),
-            "training_date": datetime.now().isoformat(),
             "accuracy": float(accuracy),
-            "classification_report": class_report,
-            "features": list(X.columns),
-            "parameters": {
-                "test_size": TEST_SIZE,
-                "random_seed": RANDOM_SEED
-            }
+            "model_path": model_path,
+            "features": features,
+            "timestamp": datetime.now().isoformat(),
+            "model_version": MODEL_VERSION
         }
         
-        with open(METADATA_OUTPUT_PATH, 'w') as f:
-            json.dump(metadata, f, indent=4)
-        logger.info(f"Model metadata saved to {METADATA_OUTPUT_PATH}")
+        if scaler:
+            metadata["scaler_path"] = scaler_path
         
-        print(f"Model saved to {MODEL_OUTPUT_PATH}")
-        print(f"Scaler saved to {SCALER_PATH}")
+        if model_type in ['pytorch', 'xgb'] and label_encoder is not None:
+            metadata["encoder_path"] = encoder_path
+        
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        logger.info(f"Metadata saved to {metadata_path}")
         
         return model, accuracy, X_test, y_test, y_pred
     
@@ -3069,6 +3222,202 @@ def _train_model_wrapper(args):
     except Exception as e:
         logger.error(f"Error training {model_type} model in parallel process: {e}")
         return model_type, None, 0.0, 0.0
+
+# ---------------------- DEEP LEARNING MODELS ---------------------- #
+class CognitiveWorkloadNet(nn.Module):
+    """
+    PyTorch neural network for cognitive workload classification.
+    
+    This model uses multiple fully connected layers with dropout for regularization,
+    batch normalization for training stability, and ReLU activations.
+    """
+    def __init__(self, input_dim, hidden_dims=[128, 64, 32], dropout_rate=0.3, num_classes=3):
+        """
+        Initialize the neural network for cognitive workload classification.
+        
+        Args:
+            input_dim (int): Number of input features
+            hidden_dims (list): List of hidden layer dimensions
+            dropout_rate (float): Dropout probability for regularization
+            num_classes (int): Number of output classes
+        """
+        super(CognitiveWorkloadNet, self).__init__()
+        
+        self.input_dim = input_dim
+        self.hidden_dims = hidden_dims
+        self.dropout_rate = dropout_rate
+        self.num_classes = num_classes
+        
+        # Create layers dynamically based on hidden_dims
+        layers = []
+        prev_dim = input_dim
+        
+        for i, hidden_dim in enumerate(hidden_dims):
+            # Add fully connected layer
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            prev_dim = hidden_dim
+        
+        # Create sequential model with all layers
+        self.hidden_layers = nn.Sequential(*layers)
+        
+        # Final output layer
+        self.output_layer = nn.Linear(hidden_dims[-1], num_classes)
+    
+    def forward(self, x):
+        """Forward pass through the network"""
+        x = self.hidden_layers(x)
+        return self.output_layer(x)
+
+def train_torch_model(X_train, y_train, X_val, y_val, model_params=None, num_epochs=100, batch_size=32, learning_rate=0.001, device=None):
+    """
+    Train a PyTorch neural network model for cognitive workload classification.
+    
+    Args:
+        X_train (array): Training features
+        y_train (array): Training labels
+        X_val (array): Validation features
+        y_val (array): Validation labels
+        model_params (dict): Neural network parameters
+        num_epochs (int): Number of training epochs
+        batch_size (int): Batch size for training
+        learning_rate (float): Learning rate for optimizer
+        device (str): Device to use for training ('cuda' or 'cpu')
+        
+    Returns:
+        tuple: (trained_model, training_history)
+    """
+    logger.info(f"Training PyTorch neural network with {num_epochs} epochs and batch size {batch_size}")
+    
+    if model_params is None:
+        model_params = {
+            'hidden_dims': [128, 64, 32],
+            'dropout_rate': 0.3
+        }
+    
+    # Determine device
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Using device: {device}")
+    
+    # Convert data to PyTorch tensors
+    X_train_tensor = torch.FloatTensor(X_train).to(device)
+    y_train_tensor = torch.LongTensor(y_train).to(device)
+    X_val_tensor = torch.FloatTensor(X_val).to(device)
+    y_val_tensor = torch.LongTensor(y_val).to(device)
+    
+    # Create data loaders
+    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    
+    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size)
+    
+    # Initialize model
+    input_dim = X_train.shape[1]
+    num_classes = len(np.unique(y_train))
+    model = CognitiveWorkloadNet(
+        input_dim=input_dim,
+        hidden_dims=model_params['hidden_dims'],
+        dropout_rate=model_params['dropout_rate'],
+        num_classes=num_classes
+    ).to(device)
+    
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    
+    # Track metrics during training
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'train_acc': [],
+        'val_acc': []
+    }
+    
+    best_val_loss = float('inf')
+    best_model_state = None
+    patience_counter = 0
+    patience = 10  # Early stopping patience
+    
+    # Training loop
+    for epoch in range(num_epochs):
+        model.train()
+        train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+        
+        # Training step
+        for inputs, targets in train_loader:
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            train_total += targets.size(0)
+            train_correct += (predicted == targets).sum().item()
+        
+        # Calculate training metrics
+        train_loss = train_loss / len(train_loader.dataset)
+        train_acc = train_correct / train_total
+        
+        # Validation step
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        
+        with torch.no_grad():
+            for inputs, targets in val_loader:
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                
+                val_loss += loss.item() * inputs.size(0)
+                _, predicted = torch.max(outputs, 1)
+                val_total += targets.size(0)
+                val_correct += (predicted == targets).sum().item()
+        
+        # Calculate validation metrics
+        val_loss = val_loss / len(val_loader.dataset)
+        val_acc = val_correct / val_total
+        
+        # Update learning rate
+        scheduler.step(val_loss)
+        
+        # Record history
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['train_acc'].append(train_acc)
+        history['val_acc'].append(val_acc)
+        
+        # Print progress
+        if (epoch + 1) % 10 == 0:
+            logger.info(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}')
+        
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = model.state_dict().copy()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            
+        # Early stopping
+        if patience_counter >= patience:
+            logger.info(f'Early stopping triggered at epoch {epoch+1}')
+            break
+    
+    # Load best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+    
+    return model, history
 
 if __name__ == "__main__":
     # Special case for !help command
