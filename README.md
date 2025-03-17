@@ -39,46 +39,74 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Quick Start
+## Usage
 
-### Install Sample Models
+The CWT provides a command-line interface with several commands:
 
-To quickly get started with pre-trained models (no real data needed):
+### Getting Help
 
 ```bash
-python cwt.py install-models
+python cwt.py help
+# or
+./!help
 ```
 
-This will create sample models trained on synthetic data and a sample input file for testing.
+### Training a Model
 
-### Make Predictions
+```bash
+python cwt.py train --model-type rf
+```
 
-After installing sample models, you can make predictions:
+Available model types:
+
+- `rf` - Random Forest
+- `svm` - Support Vector Machine
+- `gb` - Gradient Boosting
+- `mlp` - Neural Network (MLP)
+- `knn` - K-Nearest Neighbors
+- `lr` - Logistic Regression
+
+### Making Predictions
 
 ```bash
 python cwt.py predict --input data/sample_input.json
 ```
 
-### List Available Models
+### Installing Sample Models
 
-To see all available trained models:
+```bash
+python cwt.py install-models
+```
+
+### Downloading Advanced Models
+
+To improve prediction accuracy, you can download advanced pre-trained models:
+
+```bash
+# Download all advanced models
+python download_advanced_models.py --all
+
+# Download a specific model type
+python download_advanced_models.py --model-type gb
+```
+
+These advanced models provide several benefits:
+
+- Higher accuracy (up to 0.92 compared to ~0.35 for sample models)
+- Trained on larger datasets (up to 35,000 samples)
+- More sophisticated feature engineering
+- More robustness to missing or noisy data
+
+Use the advanced models for prediction:
+
+```bash
+python cwt.py predict --input data/sample_input.json --model models/Advanced_gb_model.joblib --scaler models/Advanced_gb_scaler.joblib
+```
+
+### Listing Available Models
 
 ```bash
 python cwt.py list-models
-```
-
-### Train a New Model
-
-To train a new model with your own data:
-
-```bash
-python cwt.py train
-```
-
-Or specify a model type:
-
-```bash
-python cwt.py train --model-type rf  # Random Forest
 ```
 
 ## Data Format
@@ -146,4 +174,3 @@ If you use this tool in your research, please cite it as:
   url = {https://github.com/yourusername/CWT-Learning_Model}
 }
 ```
-

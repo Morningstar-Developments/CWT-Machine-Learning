@@ -219,12 +219,45 @@ The tool provides detailed error messages for common issues:
 
 The tool's behavior can be customized through the `.env` file:
 
-```
+```bash
 # Feature engineering options
 ENABLE_FEATURE_SCALING=true
 CREATE_INTERACTION_FEATURES=true
 DROP_CORRELATED_FEATURES=true
 CORRELATION_THRESHOLD=0.9
+
+# Model hyperparameters
+# Random Forest
+RF_N_ESTIMATORS=100
+RF_MAX_DEPTH=None
+RF_MIN_SAMPLES_SPLIT=2
+
+# Support Vector Machine
+SVM_C=1.0
+SVM_KERNEL=rbf
+SVM_GAMMA=scale
+
+# Gradient Boosting
+GB_N_ESTIMATORS=100
+GB_LEARNING_RATE=0.1
+GB_MAX_DEPTH=3
+
+# Neural Network
+NN_HIDDEN_LAYER_SIZES=100,50
+NN_ACTIVATION=relu
+NN_SOLVER=adam
+NN_MAX_ITER=500
+
+# K-Nearest Neighbors
+KNN_N_NEIGHBORS=5
+KNN_WEIGHTS=uniform
+KNN_ALGORITHM=auto
+
+# Logistic Regression
+LR_C=1.0
+LR_PENALTY=l2
+LR_SOLVER=lbfgs
+LR_MAX_ITER=100
 
 # Model hyperparameters
 # Random Forest
