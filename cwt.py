@@ -1920,6 +1920,458 @@ def predict_automatic(input_data, output_path=None, model_path=None, scaler_path
         print(f"\n✘ ERROR: Automatic prediction failed: {e}")
         raise
 
+# ---------------------- FEATURE INFERENCE ---------------------- #
+def infer_missing_features(data, reference_data=None):
+    """
+    Infer missing features based on available data and correlation patterns.
+    Uses a combination of methods:
+    1. Standard imputation for simple missing values
+    2. Regression models for related features (e.g., pupil metrics from other physiological data)
+    3. Empirical distributions when no correlation data is available
+    
+    Args:
+        data (dict or DataFrame): Input data with potentially missing features
+        reference_data (DataFrame, optional): External reference data to use for inference
+        
+    Returns:
+        dict or DataFrame: Data with inferred values for missing features
+    """
+    # Convert input to DataFrame if it's a dictionary
+    is_dict_input = isinstance(data, dict)
+    if is_dict_input:
+        df = pd.DataFrame([data])
+    else:
+        df = data.copy()
+    
+    logger.info(f"Inferring missing features for dataset with {len(df)} rows")
+    
+    # Core features that we expect to have
+    core_features = [
+        "pulse_rate", "blood_pressure_sys", "resp_rate", "workload_intensity",
+        "pupil_diameter_left", "pupil_diameter_right", "fixation_duration", 
+        "blink_rate", "gaze_x", "gaze_y", "alpha_power", "theta_power"
+    ]
+    
+    # Check which features are missing
+    missing_features = [f for f in core_features if f not in df.columns or df[f].isnull().all()]
+    
+    if not missing_features:
+        logger.info("No missing core features detected")
+        return data  # Return original data if nothing is missing
+    
+    logger.info(f"Detected missing features: {missing_features}")
+    
+    # Load reference data if none provided
+    if reference_data is None:
+        try:
+            reference_data = load_reference_data()
+        except Exception as e:
+            logger.warning(f"Could not load reference data: {e}. Using empirical distributions.")
+            reference_data = None
+    
+    # Apply different inference methods based on available data
+    for feature in missing_features:
+        # Check if we have a specific imputation function for this feature
+        if feature in ["pupil_diameter_left", "pupil_diameter_right"]:
+            df = infer_pupil_metrics(df, reference_data)
+        
+        elif feature in ["alpha_power", "theta_power"]:
+            df = infer_eeg_metrics(df, reference_data)
+        
+        elif feature == "workload_intensity":
+            df = infer_workload_intensity(df, reference_data)
+            
+        else:
+            # Generic imputation for other features
+            df = impute_generic_feature(df, feature, reference_data)
+    
+    # Verify that all required features are now present
+    still_missing = [f for f in core_features if f not in df.columns]
+    if still_missing:
+        logger.warning(f"Some features could not be inferred: {still_missing}")
+    
+    # Return in the same format as input
+    if is_dict_input:
+        return df.iloc[0].to_dict()
+    else:
+        return df
+
+def load_reference_data():
+    """
+    Load reference data from external resources for feature inference.
+    Combines physiological, EEG, and gaze data from multiple sources.
+    
+    Returns:
+        DataFrame: Combined reference data
+    """
+    logger.info("Loading reference data for feature inference")
+    
+    try:
+        # Try to load from configured data paths
+        has_real_data = True
+        for data_type, file_path in DATA_FILES.items():
+            if not os.path.exists(file_path):
+                has_real_data = False
+                break
+        
+        if has_real_data:
+            logger.info("Using real data files as reference")
+            df_physio, df_eeg, df_gaze = load_data()
+            
+            # Merge the data
+            df = pd.merge_asof(df_physio.sort_values("timestamp"), 
+                             df_eeg.sort_values("timestamp"), 
+                             on="timestamp")
+            df = pd.merge_asof(df.sort_values("timestamp"), 
+                             df_gaze.sort_values("timestamp"), 
+                             on="timestamp")
+            
+            # Select relevant features
+            features = ["pulse_rate", "blood_pressure_sys", "resp_rate", "pupil_diameter_left",
+                      "pupil_diameter_right", "fixation_duration", "blink_rate", "workload_intensity",
+                      "gaze_x", "gaze_y", "alpha_power", "theta_power"]
+            
+            # Drop rows with missing values
+            df = df[features].dropna()
+            
+            return df
+        else:
+            # Try to load pre-packaged reference data
+            reference_path = os.path.join('data', 'reference', 'cognitive_workload_reference.csv')
+            if os.path.exists(reference_path):
+                logger.info(f"Loading reference data from {reference_path}")
+                return pd.read_csv(reference_path)
+            
+            # Create synthetic data as a last resort
+            logger.warning("No reference data found. Generating synthetic reference data.")
+            return generate_synthetic_reference_data()
+            
+    except Exception as e:
+        logger.error(f"Error loading reference data: {e}")
+        logger.warning("Falling back to synthetic reference data")
+        return generate_synthetic_reference_data()
+
+def generate_synthetic_reference_data(n_samples=1000):
+    """
+    Generate synthetic reference data when no real data is available.
+    
+    Args:
+        n_samples: Number of synthetic samples to generate
+        
+    Returns:
+        DataFrame: Synthetic reference data
+    """
+    logger.info(f"Generating {n_samples} synthetic reference data points")
+    
+    # Generate random data with realistic distributions
+    data = {
+        "pulse_rate": np.random.normal(75, 10, n_samples).clip(50, 120),
+        "blood_pressure_sys": np.random.normal(120, 15, n_samples).clip(90, 180),
+        "resp_rate": np.random.normal(16, 3, n_samples).clip(8, 30),
+        "workload_intensity": np.random.uniform(10, 90, n_samples)
+    }
+    
+    # Create DataFrame
+    df = pd.DataFrame(data)
+    
+    # Add derived features with realistic correlations
+    
+    # Pupil diameter correlates with workload intensity
+    base_pupil = 3 + df["workload_intensity"] * 0.03
+    noise = np.random.normal(0, 0.2, n_samples)
+    df["pupil_diameter_left"] = (base_pupil + noise).clip(2.5, 7.5)
+    df["pupil_diameter_right"] = (base_pupil + np.random.normal(0, 0.15, n_samples)).clip(2.5, 7.5)
+    
+    # Fixation duration is inversely related to workload
+    df["fixation_duration"] = (400 - df["workload_intensity"] * 2.5 + 
+                             np.random.normal(0, 20, n_samples)).clip(150, 450)
+    
+    # Blink rate decreases with workload
+    df["blink_rate"] = (22 - df["workload_intensity"] * 0.15 + 
+                      np.random.normal(0, 2, n_samples)).clip(5, 25)
+    
+    # Gaze position (less dependent)
+    df["gaze_x"] = np.random.normal(500, 50, n_samples)
+    df["gaze_y"] = np.random.normal(375, 40, n_samples)
+    
+    # EEG features
+    # Alpha power decreases with workload
+    df["alpha_power"] = (30 - df["workload_intensity"] * 0.2 + 
+                       np.random.normal(0, 3, n_samples)).clip(5, 35)
+    
+    # Theta power increases with workload
+    df["theta_power"] = (15 + df["workload_intensity"] * 0.15 + 
+                       np.random.normal(0, 2, n_samples)).clip(10, 35)
+    
+    logger.info("Synthetic reference data generated")
+    return df
+
+def infer_pupil_metrics(df, reference_data):
+    """
+    Infer missing pupil diameter metrics based on other physiological data.
+    
+    Args:
+        df: DataFrame with potentially missing pupil metrics
+        reference_data: Reference data for inference
+        
+    Returns:
+        DataFrame: Updated DataFrame with inferred pupil metrics
+    """
+    # Check if both pupil metrics are missing
+    left_missing = "pupil_diameter_left" not in df.columns or df["pupil_diameter_left"].isnull().all()
+    right_missing = "pupil_diameter_right" not in df.columns or df["pupil_diameter_right"].isnull().all()
+    
+    # If only one is missing, we can approximate from the other
+    if left_missing and not right_missing:
+        logger.info("Inferring left pupil diameter from right pupil diameter")
+        df["pupil_diameter_left"] = df["pupil_diameter_right"] * np.random.uniform(0.97, 1.03)
+        return df
+    
+    if right_missing and not left_missing:
+        logger.info("Inferring right pupil diameter from left pupil diameter")
+        df["pupil_diameter_right"] = df["pupil_diameter_left"] * np.random.uniform(0.97, 1.03)
+        return df
+    
+    # Both are missing, use other metrics to infer
+    if (left_missing and right_missing):
+        logger.info("Inferring both pupil diameters from other physiological metrics")
+        
+        # The primary driver of pupil diameter is workload intensity
+        if "workload_intensity" in df.columns and reference_data is not None:
+            logger.info("Using workload intensity to infer pupil diameters")
+            
+            # Calculate base pupil size based on workload intensity
+            for idx, row in df.iterrows():
+                workload = row["workload_intensity"]
+                base_pupil = 3.0 + (workload / 100.0) * 3.0  # Map 0-100 workload to 3.0-6.0mm pupil
+                
+                # Add random variation for realistic data
+                df.at[idx, "pupil_diameter_left"] = base_pupil + np.random.normal(0, 0.2)
+                df.at[idx, "pupil_diameter_right"] = base_pupil + np.random.normal(0, 0.18)
+                
+        elif all(col in df.columns for col in ["pulse_rate", "blood_pressure_sys"]):
+            logger.info("Using physiological metrics to infer pupil diameters")
+            
+            # Physiological markers also correlate with pupil diameter
+            for idx, row in df.iterrows():
+                # Normalize physiological metrics
+                pulse_norm = (row["pulse_rate"] - 60) / 60  # Normalize to 0-1 range
+                bp_norm = (row["blood_pressure_sys"] - 90) / 90  # Normalize to 0-1 range
+                
+                # Calculate base pupil diameter from physiological state
+                base_pupil = 3.5 + (pulse_norm * 1.5) + (bp_norm * 1.5)
+                
+                # Add random variation
+                df.at[idx, "pupil_diameter_left"] = min(max(base_pupil + np.random.normal(0, 0.2), 2.5), 7.5)
+                df.at[idx, "pupil_diameter_right"] = min(max(base_pupil + np.random.normal(0, 0.18), 2.5), 7.5)
+        
+        else:
+            logger.warning("Limited data for pupil inference, using reference distributions")
+            
+            # Use default mid-range values with variation
+            for idx in range(len(df)):
+                base_pupil = 4.5  # Default mid-range pupil size
+                df.at[idx, "pupil_diameter_left"] = base_pupil + np.random.normal(0, 0.5)
+                df.at[idx, "pupil_diameter_right"] = base_pupil + np.random.normal(0, 0.45)
+    
+    return df
+
+def infer_eeg_metrics(df, reference_data):
+    """
+    Infer missing EEG metrics (alpha_power, theta_power) from other data.
+    
+    Args:
+        df: DataFrame with potentially missing EEG metrics
+        reference_data: Reference data for inference
+        
+    Returns:
+        DataFrame: Updated DataFrame with inferred EEG metrics
+    """
+    alpha_missing = "alpha_power" not in df.columns or df["alpha_power"].isnull().all()
+    theta_missing = "theta_power" not in df.columns or df["theta_power"].isnull().all()
+    
+    # EEG metrics are primarily related to workload intensity
+    if "workload_intensity" in df.columns:
+        logger.info("Using workload intensity to infer EEG metrics")
+        
+        # Alpha power inversely correlates with workload
+        if alpha_missing:
+            logger.info("Inferring alpha power from workload intensity")
+            df["alpha_power"] = df.apply(
+                lambda row: min(max(30 - row["workload_intensity"] * 0.2 + np.random.normal(0, 2), 5), 35),
+                axis=1
+            )
+        
+        # Theta power positively correlates with workload
+        if theta_missing:
+            logger.info("Inferring theta power from workload intensity")
+            df["theta_power"] = df.apply(
+                lambda row: min(max(15 + row["workload_intensity"] * 0.15 + np.random.normal(0, 2), 10), 35),
+                axis=1
+            )
+    
+    # If no workload intensity, use reference data or defaults
+    else:
+        logger.warning("No workload intensity data available for EEG inference")
+        
+        if reference_data is not None:
+            logger.info("Using reference data distributions for EEG metrics")
+            
+            if alpha_missing:
+                alpha_mean = reference_data["alpha_power"].mean()
+                alpha_std = reference_data["alpha_power"].std()
+                df["alpha_power"] = np.random.normal(alpha_mean, alpha_std, len(df)).clip(5, 35)
+            
+            if theta_missing:
+                theta_mean = reference_data["theta_power"].mean()
+                theta_std = reference_data["theta_power"].std()
+                df["theta_power"] = np.random.normal(theta_mean, theta_std, len(df)).clip(10, 35)
+        
+        else:
+            logger.warning("Using default distributions for EEG metrics")
+            
+            if alpha_missing:
+                df["alpha_power"] = np.random.normal(18, 5, len(df)).clip(5, 35)
+            
+            if theta_missing:
+                df["theta_power"] = np.random.normal(20, 5, len(df)).clip(10, 35)
+    
+    return df
+
+def infer_workload_intensity(df, reference_data):
+    """
+    Infer workload intensity from other physiological and behavioral metrics.
+    
+    Args:
+        df: DataFrame with missing workload_intensity
+        reference_data: Reference data for inference
+        
+    Returns:
+        DataFrame: Updated DataFrame with inferred workload_intensity
+    """
+    logger.info("Inferring workload intensity from other metrics")
+    
+    # Define feature weights and directions for workload inference
+    workload_indicators = {
+        # Feature: [weight, direction] (positive direction = higher value means higher workload)
+        "pulse_rate": [0.20, 1],
+        "blood_pressure_sys": [0.15, 1],
+        "resp_rate": [0.15, 1],
+        "pupil_diameter_left": [0.10, 1],
+        "pupil_diameter_right": [0.10, 1],
+        "fixation_duration": [0.10, -1],  # Negative: shorter fixations = higher workload
+        "blink_rate": [0.10, -1],         # Negative: fewer blinks = higher workload
+        "alpha_power": [0.10, -1],        # Negative: lower alpha = higher workload
+        "theta_power": [0.10, 1]
+    }
+    
+    # Calculate workload intensity for each row
+    for idx, row in df.iterrows():
+        workload_score = 50  # Start at middle of range (0-100)
+        total_weight = 0
+        
+        # Accumulate contributions from available features
+        for feature, (weight, direction) in workload_indicators.items():
+            if feature in row and not pd.isna(row[feature]):
+                # Normalize feature value based on typical ranges
+                if feature == "pulse_rate":
+                    # Normal range: 60-100, higher = more workload
+                    norm_value = (row[feature] - 60) / 40
+                elif feature == "blood_pressure_sys":
+                    # Normal range: 90-150, higher = more workload
+                    norm_value = (row[feature] - 90) / 60
+                elif feature == "resp_rate":
+                    # Normal range: 12-20, higher = more workload
+                    norm_value = (row[feature] - 12) / 8
+                elif feature in ["pupil_diameter_left", "pupil_diameter_right"]:
+                    # Typical range: 3-7mm, higher = more workload
+                    norm_value = (row[feature] - 3) / 4
+                elif feature == "fixation_duration":
+                    # Typical range: 200-400ms, lower = more workload
+                    norm_value = (400 - row[feature]) / 200
+                elif feature == "blink_rate":
+                    # Typical range: 5-25 bpm, lower = more workload
+                    norm_value = (25 - row[feature]) / 20
+                elif feature == "alpha_power":
+                    # Typical range: 5-35, lower = more workload
+                    norm_value = (35 - row[feature]) / 30
+                elif feature == "theta_power":
+                    # Typical range: 10-35, higher = more workload
+                    norm_value = (row[feature] - 10) / 25
+                else:
+                    # Unknown feature, skip
+                    continue
+                
+                # Apply weight and direction
+                workload_score += norm_value * direction * weight * 50
+                total_weight += weight
+        
+        # Normalize and constrain to 0-100 range
+        if total_weight > 0:
+            # Scale by actual weight used
+            workload_score = workload_score / total_weight * 0.5
+            # Constrain to reasonable range
+            workload_score = min(max(workload_score, 10), 90)
+        
+        df.at[idx, "workload_intensity"] = workload_score
+    
+    return df
+
+def impute_generic_feature(df, feature, reference_data):
+    """
+    Generic imputation for any missing feature.
+    
+    Args:
+        df: DataFrame with missing feature
+        feature: Name of the missing feature
+        reference_data: Reference data for inference
+        
+    Returns:
+        DataFrame: Updated DataFrame with imputed feature
+    """
+    logger.info(f"Imputing missing feature: {feature}")
+    
+    # Default feature ranges for imputation
+    default_ranges = {
+        "pulse_rate": [60, 100],  # min, max
+        "blood_pressure_sys": [90, 150],
+        "resp_rate": [12, 20],
+        "pupil_diameter_left": [3.0, 7.0],
+        "pupil_diameter_right": [3.0, 7.0],
+        "fixation_duration": [180, 400],
+        "blink_rate": [5, 25],
+        "workload_intensity": [10, 90],
+        "gaze_x": [0, 1000],
+        "gaze_y": [0, 750],
+        "alpha_power": [5, 35],
+        "theta_power": [10, 35],
+    }
+    
+    # Use reference data if available
+    if reference_data is not None and feature in reference_data.columns:
+        mean_val = reference_data[feature].mean()
+        std_val = reference_data[feature].std()
+        df[feature] = np.random.normal(mean_val, std_val, len(df))
+        
+        # Ensure values are within reasonable range
+        if feature in default_ranges:
+            min_val, max_val = default_ranges[feature]
+            df[feature] = df[feature].clip(min_val, max_val)
+    
+    # Use default distributions
+    elif feature in default_ranges:
+        min_val, max_val = default_ranges[feature]
+        mean_val = (min_val + max_val) / 2
+        std_val = (max_val - min_val) / 4
+        df[feature] = np.random.normal(mean_val, std_val, len(df)).clip(min_val, max_val)
+    
+    # Unknown feature, use zeros
+    else:
+        logger.warning(f"No default range for feature: {feature}, using zero")
+        df[feature] = 0
+    
+    return df
+
 # ---------------------- MAIN EXECUTION ---------------------- #
 def main():
     """Main entry point for the application."""
