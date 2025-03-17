@@ -483,35 +483,55 @@ def predict_new_data(model_path, scaler_path, new_data):
         logger.info(f"Loading scaler from {scaler_path}")
         scaler = joblib.load(scaler_path)
         
-        # Try to load metadata to determine model type
-        try:
-            metadata_path = model_path.replace('.joblib', '.metadata.json')
-            if os.path.exists(metadata_path):
-                with open(metadata_path, 'r') as f:
-                    metadata = json.load(f)
-                model_type = metadata.get('model_type', 'unknown')
-                logger.info(f"Model type from metadata: {model_type}")
-            else:
-                model_type = "unknown"
-                logger.info("No metadata found, model type unknown")
-        except Exception as e:
-            logger.warning(f"Could not determine model type from metadata: {str(e)}")
-            model_type = "unknown"
+        # Get the feature names used by the scaler
+        if hasattr(scaler, 'feature_names_in_'):
+            scaler_features = scaler.feature_names_in_.tolist()
+            logger.info(f"Scaler was fit with {len(scaler_features)} features")
+        else:
+            scaler_features = list(new_data.keys())
+            logger.warning("Scaler does not have feature_names_in_ attribute, using input data keys")
         
-        # Convert input to DataFrame
-        logger.debug("Preparing input data for prediction")
-        new_data_df = pd.DataFrame([new_data])
+        # Get the feature names used by the model
+        if hasattr(model, 'feature_names_in_'):
+            model_features = model.feature_names_in_.tolist()
+            logger.info(f"Model was trained with {len(model_features)} features")
+        else:
+            # If model doesn't have feature_names_in_, use a predefined list (less reliable)
+            model_features = [
+                "pulse_rate", "blood_pressure_sys", "resp_rate", "pupil_diameter_left",
+                "pupil_diameter_right", "fixation_duration", "blink_rate", 
+                "gaze_x", "gaze_y", "alpha_power", "theta_power"
+            ]
+            logger.warning("Model does not have feature_names_in_ attribute, using default features")
+        
+        # Convert input to DataFrame for scaling
+        input_df = pd.DataFrame([new_data])
+        
+        # Ensure the input has all features needed by the scaler
+        for feature in scaler_features:
+            if feature not in input_df.columns:
+                logger.warning(f"Adding missing feature for scaler: {feature}")
+                input_df[feature] = 0.0
+        
+        # Select only the features the scaler knows about
+        scaler_input = input_df[scaler_features]
         
         # Scale the input data
-        new_data_scaled = scaler.transform(new_data_df)
+        scaled_data = scaler.transform(scaler_input)
+        
+        # Create a new DataFrame with the scaled data and the column names
+        scaled_df = pd.DataFrame(scaled_data, columns=scaler_features)
+        
+        # Select only the features the model was trained on
+        model_input = scaled_df[model_features]
         
         # Make prediction
         logger.debug("Making prediction")
-        prediction = model.predict(new_data_scaled)
+        prediction = model.predict(model_input)
         
         # Get class probabilities if model supports it
         if hasattr(model, 'predict_proba'):
-            prediction_proba = model.predict_proba(new_data_scaled)
+            prediction_proba = model.predict_proba(model_input)
             classes = model.classes_
             proba_dict = {str(cls): float(prob) for cls, prob in zip(classes, prediction_proba[0])}
         else:
@@ -580,8 +600,24 @@ def create_sample_input_json():
     # Generate a single sample of synthetic data
     df = generate_synthetic_data(n_samples=1, random_state=RANDOM_SEED)
     
+    # Add missing alpha_power if needed
+    if 'alpha_power' not in df.columns:
+        df['alpha_power'] = np.random.normal(10, 3, 1)
+    
+    # Ensure all required features are present
+    required_features = [
+        "pulse_rate", "blood_pressure_sys", "resp_rate", "pupil_diameter_left",
+        "pupil_diameter_right", "fixation_duration", "blink_rate", "workload_intensity",
+        "gaze_x", "gaze_y", "alpha_power", "theta_power"
+    ]
+    
+    # Add any missing features with random values
+    for feature in required_features:
+        if feature not in df.columns:
+            df[feature] = np.random.normal(10, 3, 1)
+    
     # Convert to a dictionary (drop the cognitive_state since that's what we're predicting)
-    sample_data = df.drop(columns=['cognitive_state']).iloc[0].to_dict()
+    sample_data = df.drop(columns=['cognitive_state'] if 'cognitive_state' in df.columns else []).iloc[0].to_dict()
     
     # Round values to 2 decimal places for readability
     sample_data = {k: round(v, 2) if isinstance(v, (float, np.float64)) else v 
