@@ -1,0 +1,47 @@
+2025-03-16 23:39:38,380 - cwt - INFO - Starting model training pipeline
+2025-03-16 23:39:38,380 - cwt - INFO - Selected model type: rf (Random Forest)
+2025-03-16 23:39:38,380 - cwt - INFO - Loading data files...
+2025-03-16 23:39:38,393 - cwt - INFO - Loaded physiological data: (500, 12)
+2025-03-16 23:39:38,393 - cwt - INFO - Loaded EEG data: (500, 75)
+2025-03-16 23:39:38,393 - cwt - INFO - Loaded gaze data: (500, 12)
+2025-03-16 23:39:38,393 - cwt - INFO - Preprocessing data...
+2025-03-16 23:39:38,404 - cwt - WARNING - Missing values detected after merge: 
+subject_id_y            1
+alpha_power             1
+theta_power             1
+AF3_alpha               1
+AF3_beta                1
+                       ..
+saccade_length          1
+blink_rate              1
+cognitive_load          1
+pupil_diameter_left     1
+pupil_diameter_right    1
+Length: 85, dtype: int64
+2025-03-16 23:39:38,404 - cwt - INFO - Dropping rows with missing values
+2025-03-16 23:39:38,408 - cwt - INFO - Preprocessing complete. Final dataset shape: (499, 13)
+2025-03-16 23:39:38,409 - cwt - INFO - Scaler saved to models/scaler_20250316_233938.joblib
+2025-03-16 23:39:38,409 - cwt - INFO - Training model of type: rf
+2025-03-16 23:39:38,411 - cwt - INFO - Creating model of type: rf (Random Forest)
+2025-03-16 23:39:38,929 - cwt - INFO - Cross-validation scores: [0.475      0.4125     0.275      0.375      0.32911392]
+2025-03-16 23:39:38,929 - cwt - INFO - Mean CV accuracy: 0.373 ± 0.069
+2025-03-16 23:39:38,929 - cwt - INFO - Fitting model on training data
+2025-03-16 23:39:39,048 - cwt - INFO - Model Accuracy: 0.350
+2025-03-16 23:39:39,051 - cwt - INFO - Classification Report:
+               precision    recall  f1-score   support
+
+        High       0.41      0.41      0.41        34
+         Low       0.35      0.24      0.29        33
+      Medium       0.30      0.39      0.34        33
+
+    accuracy                           0.35       100
+   macro avg       0.35      0.35      0.35       100
+weighted avg       0.35      0.35      0.35       100
+
+2025-03-16 23:39:39,244 - cwt - INFO - Confusion matrix plot saved to models/confusion_matrix_20250316_233938.png
+2025-03-16 23:39:39,316 - cwt - INFO - Feature importance plot saved to models/feature_importance_20250316_233938.png
+2025-03-16 23:39:39,316 - cwt - INFO - Saving model to models/Cognitive_State_Prediction_Model_20250316_233938.joblib
+2025-03-16 23:39:39,339 - cwt - INFO - Model metadata saved to models/metadata_20250316_233938.json
+2025-03-16 23:39:39,339 - cwt - INFO - Model training complete. Accuracy: 0.350
+2025-03-16 23:39:39,339 - cwt - INFO - Model saved at models/Cognitive_State_Prediction_Model_20250316_233938.joblib
+2025-03-16 23:39:39,339 - cwt - INFO - Scaler saved at models/scaler_20250316_233938.joblib
