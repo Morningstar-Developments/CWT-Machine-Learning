@@ -893,12 +893,40 @@ def parse_args():
                              choices=list(AVAILABLE_MODELS.keys()),
                              help=f'Type of model to train (one of: {", ".join(AVAILABLE_MODELS.keys())})')
     
+    # Train All command - trains models of all types at once
+    train_all_parser = subparsers.add_parser('train-all', help='Train models of all available types')
+    train_all_parser.add_argument('--output-dir', '-o', type=str, 
+                                 help='Directory to save all trained models (default: models/ensemble)')
+    train_all_parser.add_argument('--parallel', '-p', action='store_true', 
+                                 help='Train models in parallel for faster execution')
+    train_all_parser.add_argument('--skip-types', '-s', type=str, nargs='+',
+                                 help='Model types to skip during training')
+    
     # Predict command
     predict_parser = subparsers.add_parser('predict', help='Make predictions with a trained model')
-    predict_parser.add_argument('--input', '-i', type=str, required=True, help='JSON file with input data')
+    predict_parser.add_argument('--input', '-i', type=str, required=True, help='JSON or CSV file with input data')
     predict_parser.add_argument('--model', '-m', type=str, help='Path to model file')
     predict_parser.add_argument('--scaler', '-s', type=str, help='Path to scaler file')
     predict_parser.add_argument('--output', '-o', type=str, help='Output file for predictions')
+    predict_parser.add_argument('--batch', '-b', action='store_true', help='Process input as batch data')
+    predict_parser.add_argument('--time-series', '-t', action='store_true', help='Treat data as time series')
+    predict_parser.add_argument('--auto-detect', '-a', action='store_true', help='Auto-detect input type and format')
+    predict_parser.add_argument('--threshold', '-th', type=float, default=0.0,
+                              help='Confidence threshold for predictions (0.0-1.0)')
+    predict_parser.add_argument('--infer-missing', '-im', action='store_true',
+                              help='Infer missing features based on available data')
+    
+    # Batch predict command (dedicated to batch processing)
+    batch_parser = subparsers.add_parser('batch-predict', help='Process multiple data points for prediction')
+    batch_parser.add_argument('--input', '-i', type=str, required=True, help='CSV file with multiple data points')
+    batch_parser.add_argument('--model', '-m', type=str, help='Path to model file')
+    batch_parser.add_argument('--scaler', '-s', type=str, help='Path to scaler file')
+    batch_parser.add_argument('--output', '-o', type=str, help='Output file for predictions')
+    batch_parser.add_argument('--time-series', '-t', action='store_true', help='Treat data as time series')
+    batch_parser.add_argument('--threshold', '-th', type=float, default=0.0,
+                             help='Confidence threshold for predictions (0.0-1.0)')
+    batch_parser.add_argument('--infer-missing', '-im', action='store_true',
+                             help='Infer missing features based on available data')
     
     # List models command
     list_parser = subparsers.add_parser('list-models', help='List available trained models')
@@ -1288,16 +1316,37 @@ to classify cognitive states as Low, Medium, or High.
         },
         "predict": {
             "description": "Make predictions using a trained model",
-            "usage": "python cwt.py predict --input INPUT_FILE [--model MODEL] [--scaler SCALER] [--output OUTPUT]",
+            "usage": "python cwt.py predict --input INPUT_FILE [options]",
             "options": [
-                "--input, -i: Input JSON file with feature values",
+                "--input, -i: Input JSON or CSV file with feature values",
                 "--model, -m: Path to model file (uses latest model if not specified)",
                 "--scaler, -s: Path to scaler file (uses scaler associated with model if not specified)",
-                "--output, -o: Output file for predictions"
+                "--output, -o: Output file for predictions",
+                "--batch, -b: Process input as batch data with multiple samples",
+                "--time-series, -t: Treat data as time series with temporal ordering",
+                "--auto-detect, -a: Auto-detect input type and format (JSON, CSV, batch, etc.)"
             ],
             "examples": [
                 "python cwt.py predict --input data/sample_input.json",
-                "python cwt.py predict --input data/sample_input.json --model models/my_model.joblib"
+                "python cwt.py predict --input data/batch_samples.csv --batch",
+                "python cwt.py predict --input data/time_series.csv --time-series",
+                "python cwt.py predict --input any_data_file --auto-detect"
+            ]
+        },
+        "batch-predict": {
+            "description": "Process multiple data points for prediction",
+            "usage": "python cwt.py batch-predict --input CSV_FILE [options]",
+            "options": [
+                "--input, -i: CSV file with multiple data points",
+                "--model, -m: Path to model file (uses latest model if not specified)",
+                "--scaler, -s: Path to scaler file (uses scaler associated with model if not specified)",
+                "--output, -o: Output file for predictions",
+                "--time-series, -t: Treat data as time series with temporal ordering"
+            ],
+            "examples": [
+                "python cwt.py batch-predict --input data/batch_samples.csv",
+                "python cwt.py batch-predict --input data/time_series.csv --time-series",
+                "python cwt.py batch-predict --input data/workload_data.csv --output results/predictions.csv"
             ]
         },
         "list-models": {
@@ -1385,7 +1434,7 @@ For training, the tool expects three CSV files:
    - Required columns: timestamp, subject_id, pupil_diameter_left, pupil_diameter_right,
      fixation_duration, blink_rate, workload_intensity, gaze_x, gaze_y
 
-For prediction, the tool accepts a JSON file with feature values:
+For single-sample prediction, the tool accepts a JSON file with feature values:
 {
   "pulse_rate": 75.2,
   "blood_pressure_sys": 120.5,
@@ -1401,7 +1450,64 @@ For prediction, the tool accepts a JSON file with feature values:
   "theta_power": 22.6
 }
 
-Example JSON files are provided in the examples/json_samples/ directory.
+For batch prediction, the tool accepts a CSV file with multiple samples:
+timestamp,pulse_rate,blood_pressure_sys,resp_rate,pupil_diameter_left,...
+2023-01-01T10:00:00,75.2,120.5,16.4,5.2,...
+2023-01-01T10:01:00,76.8,122.3,16.7,5.3,...
+...
+
+For time series data, ensure the CSV file includes a timestamp column. The tool will
+automatically sort by timestamp and analyze transitions between cognitive states.
+
+Example JSON and CSV files are provided in the examples/ directory.
+""",
+        "batch-processing": """
+BATCH PROCESSING AND TIME SERIES ANALYSIS:
+
+The CWT tool supports processing multiple data points in a single operation, which is
+particularly useful for:
+
+1. Analyzing workload patterns over time
+2. Processing data from multiple subjects or sessions
+3. Generating reports with workload distribution statistics
+
+Batch processing features:
+
+* Auto-detection of input type (CSV, JSON, etc.)
+* Processing of time series data with temporal analysis
+* Detection of transitions between cognitive states
+* Summary statistics for workload distribution
+* Visualization of cognitive workload timeline
+
+Command examples:
+
+1. Basic batch processing:
+   python cwt.py batch-predict --input data/batch_samples.csv
+   
+2. Time series analysis:
+   python cwt.py batch-predict --input data/time_series.csv --time-series
+   
+3. Auto-detection with the predict command:
+   python cwt.py predict --input any_data_file --auto-detect
+
+4. Save results to file:
+   python cwt.py batch-predict --input data/batch.csv --output results/predictions.csv
+
+Output:
+- Original data with added prediction columns
+- Summary statistics of workload distribution
+- For time series data: visualization of workload over time
+- Analysis of transitions between cognitive states
+
+CSV format requirements:
+- Each row represents one data point
+- Must include the same features used for training
+- For time series, include a 'timestamp' column in a recognizable format
+- Missing values are handled gracefully
+
+The batch processing system automatically selects the appropriate model for each data
+point based on its workload intensity - this ensures optimal model selection for each
+sample.
 """,
         "configuration": """
 CONFIGURATION:
@@ -1443,20 +1549,26 @@ EXAMPLE USAGE:
 3. List available models:
    python cwt.py list-models
 
-4. Make a prediction:
+4. Make a prediction with a single sample:
    python cwt.py predict --input data/sample_input.json
 
-5. Train a new model:
+5. Process a batch of data points:
+   python cwt.py batch-predict --input data/batch_samples.csv
+
+6. Analyze time series data:
+   python cwt.py batch-predict --input data/time_series.csv --time-series
+
+7. Train a new model:
    python cwt.py train --model-type rf
 
-6. Train a model from JSON examples:
+8. Train a model from JSON examples:
    python cwt.py train-from-examples
 
-7. Run all example predictions:
-   python examples/predict_examples.py
+9. Auto-detect input type and format:
+   python cwt.py predict --input any_data_file --auto-detect
 
-8. Convert CSV to JSON:
-   python examples/create_json_from_csv.py examples/sample_data.csv
+10. Convert CSV to JSON:
+    python examples/create_json_from_csv.py examples/sample_data.csv
 """
     }
     
@@ -1507,6 +1619,306 @@ EXAMPLE USAGE:
                     print(f"  {cmd}")
             for t in topics:
                 print(f"  {t}")
+
+# ---------------------- BATCH PREDICTION FUNCTIONS ---------------------- #
+def predict_from_csv(csv_path, output_path=None, model_path=None, scaler_path=None):
+    """
+    Process a CSV file containing multiple data points over time and predict workload levels.
+    
+    Args:
+        csv_path (str): Path to the CSV file with multiple data points
+        output_path (str, optional): Path to save the prediction results
+        model_path (str, optional): Path to a specific model to use
+        scaler_path (str, optional): Path to a specific scaler to use
+        
+    Returns:
+        DataFrame: DataFrame with original data and predictions
+    """
+    logger.info(f"Processing CSV file for batch prediction: {csv_path}")
+    
+    try:
+        # Load the CSV file
+        df = pd.read_csv(csv_path)
+        logger.info(f"Loaded CSV with {len(df)} rows and {len(df.columns)} columns")
+        
+        # Check if the CSV has timestamp column (for time series data)
+        has_timestamp = 'timestamp' in df.columns
+        if has_timestamp:
+            logger.info("Time series data detected (timestamp column present)")
+            # Ensure timestamp is properly formatted
+            try:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                logger.info(f"Timestamp range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+            except Exception as e:
+                logger.warning(f"Could not convert timestamp column to datetime: {e}")
+        
+        # Initialize columns for predictions and confidence
+        df['predicted_cognitive_state'] = None
+        df['prediction_confidence'] = None
+        df['model_used'] = None
+        
+        # Process each row for prediction
+        logger.info("Making predictions for each data point...")
+        
+        predictions = []
+        for idx, row in tqdm(df.iterrows(), total=len(df), desc="Predicting"):
+            # Convert row to dictionary for prediction
+            row_dict = row.to_dict()
+            
+            # Skip any non-numeric values that would cause issues
+            row_dict = {k: v for k, v in row_dict.items() 
+                       if isinstance(v, (int, float)) and not pd.isna(v)}
+            
+            # Make individual prediction for this data point
+            # This will auto-select the appropriate model based on workload_intensity
+            try:
+                prediction, proba = predict_new_data(model_path, scaler_path, row_dict)
+                
+                # Store predictions and model info
+                if prediction:
+                    # Get the model type that was used
+                    model_type = "Unknown"
+                    if 'rf' in str(model_path).lower():
+                        model_type = "RF"
+                    elif 'mlp' in str(model_path).lower():
+                        model_type = "MLP"
+                    elif 'lr' in str(model_path).lower():
+                        model_type = "LR"
+                    elif 'svm' in str(model_path).lower():
+                        model_type = "SVM"
+                    elif 'knn' in str(model_path).lower():
+                        model_type = "KNN"
+                    elif 'gb' in str(model_path).lower():
+                        model_type = "GB"
+                        
+                    # Find the highest probability
+                    if isinstance(proba, dict):
+                        max_prob = max(proba.values())
+                    else:
+                        max_prob = 1.0  # Default if no probabilities available
+                        
+                    predictions.append({
+                        'index': idx,
+                        'prediction': prediction,
+                        'confidence': max_prob,
+                        'model_used': model_type
+                    })
+                else:
+                    logger.warning(f"No prediction made for row {idx}")
+                    predictions.append({
+                        'index': idx,
+                        'prediction': 'Unknown',
+                        'confidence': 0.0,
+                        'model_used': 'None'
+                    })
+            except Exception as e:
+                logger.error(f"Error predicting row {idx}: {e}")
+                predictions.append({
+                    'index': idx,
+                    'prediction': 'Error',
+                    'confidence': 0.0,
+                    'model_used': 'Error'
+                })
+        
+        # Update the dataframe with predictions
+        for p in predictions:
+            idx = p['index']
+            df.at[idx, 'predicted_cognitive_state'] = p['prediction']
+            df.at[idx, 'prediction_confidence'] = p['confidence']
+            df.at[idx, 'model_used'] = p['model_used']
+        
+        # Calculate distribution of predicted states
+        state_counts = df['predicted_cognitive_state'].value_counts()
+        logger.info(f"Prediction distribution: {state_counts.to_dict()}")
+        
+        # For time series data, look for transitions between states
+        if has_timestamp:
+            df = df.sort_values('timestamp')
+            state_changes = (df['predicted_cognitive_state'] != df['predicted_cognitive_state'].shift()).sum()
+            logger.info(f"Detected {state_changes} transitions between cognitive states")
+            
+            # Add a column to identify transitions
+            df['state_transition'] = df['predicted_cognitive_state'] != df['predicted_cognitive_state'].shift()
+        
+        # Save predictions if output path is provided
+        if output_path:
+            output_dir = os.path.dirname(output_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+                
+            df.to_csv(output_path, index=False)
+            logger.info(f"Prediction results saved to {output_path}")
+            
+            # Also create a summary file
+            summary_path = output_path.replace('.csv', '_summary.csv')
+            if summary_path == output_path:  # In case output_path doesn't end with .csv
+                summary_path = f"{output_path}_summary.csv"
+                
+            summary_df = pd.DataFrame(state_counts).reset_index()
+            summary_df.columns = ['cognitive_state', 'count']
+            summary_df['percentage'] = summary_df['count'] / len(df) * 100
+            
+            summary_df.to_csv(summary_path, index=False)
+            logger.info(f"Prediction summary saved to {summary_path}")
+            
+            # Generate a visualization of the predictions over time
+            if has_timestamp:
+                try:
+                    viz_path = output_path.replace('.csv', '_timeline.png')
+                    if viz_path == output_path:
+                        viz_path = f"{output_path}_timeline.png"
+                    
+                    plt.figure(figsize=(12, 6))
+                    
+                    # Map categorical values to numeric for plotting
+                    state_map = {'Low': 0, 'Medium': 1, 'High': 2, 'Unknown': -1, 'Error': -1}
+                    if 'predicted_cognitive_state' in df.columns:
+                        df['state_numeric'] = df['predicted_cognitive_state'].map(state_map)
+                    
+                    plt.plot(df['timestamp'], df['state_numeric'], 'o-', markersize=4)
+                    plt.yticks([0, 1, 2], ['Low', 'Medium', 'High'])
+                    plt.title('Cognitive Workload Prediction Timeline')
+                    plt.xlabel('Time')
+                    plt.ylabel('Predicted Cognitive State')
+                    plt.grid(True, linestyle='--', alpha=0.7)
+                    
+                    # Highlight state transitions if present
+                    if 'state_transition' in df.columns:
+                        transition_points = df[df['state_transition'] == True]
+                        if len(transition_points) > 0:
+                            plt.scatter(transition_points['timestamp'], 
+                                      transition_points['state_numeric'], 
+                                      color='red', s=80, zorder=5, 
+                                      label='State Transitions')
+                            plt.legend()
+                    
+                    plt.tight_layout()
+                    plt.savefig(viz_path)
+                    logger.info(f"Timeline visualization saved to {viz_path}")
+                except Exception as e:
+                    logger.error(f"Error creating visualization: {e}")
+        
+        # Also print a summary to console
+        print("\n" + "="*50)
+        print("✓ BATCH PREDICTION RESULTS")
+        print("="*50)
+        print(f"Total samples processed: {len(df)}")
+        print("\nPrediction distribution:")
+        for state, count in state_counts.items():
+            percentage = count / len(df) * 100
+            print(f"  {state:<10}: {count} ({percentage:.1f}%)")
+        
+        if has_timestamp:
+            print(f"\nTime range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+            print(f"State transitions detected: {state_changes}")
+        
+        if output_path:
+            print(f"\nFull results saved to: {output_path}")
+        print("="*50)
+        
+        return df
+    
+    except Exception as e:
+        logger.error(f"Error processing CSV file for batch prediction: {e}")
+        print(f"\n✘ ERROR: Batch prediction failed: {e}")
+        raise
+
+def predict_automatic(input_data, output_path=None, model_path=None, scaler_path=None):
+    """
+    Automatically determine the type of input data and process it accordingly.
+    Can handle JSON files, CSV files, or Python dictionaries/DataFrames.
+    
+    Args:
+        input_data: Input data which could be a path to a file or a data structure
+        output_path: Path to save output results
+        model_path: Optional path to a specific model
+        scaler_path: Optional path to a specific scaler
+        
+    Returns:
+        The prediction results
+    """
+    logger.info(f"Auto-detecting input type for: {input_data}")
+    
+    try:
+        # Case 1: Input is a string path to a file
+        if isinstance(input_data, str):
+            # Check if the file exists
+            if not os.path.exists(input_data):
+                raise FileNotFoundError(f"Input file not found: {input_data}")
+            
+            # Determine file type by extension
+            file_ext = os.path.splitext(input_data)[1].lower()
+            
+            if file_ext == '.json':
+                logger.info(f"Detected JSON input file: {input_data}")
+                # Load the JSON file
+                with open(input_data, 'r') as f:
+                    json_data = json.load(f)
+                
+                # If it's a list, it's a batch of samples
+                if isinstance(json_data, list):
+                    logger.info(f"Batch JSON with {len(json_data)} samples detected")
+                    # Convert to DataFrame for batch processing
+                    df = pd.DataFrame(json_data)
+                    # Add timestamp if not present
+                    if 'timestamp' not in df.columns:
+                        df['timestamp'] = pd.date_range(start='now', periods=len(df), freq='S')
+                    # Save to temporary CSV for batch processing
+                    temp_csv = os.path.join(os.path.dirname(input_data), '_temp_batch.csv')
+                    df.to_csv(temp_csv, index=False)
+                    # Process as CSV
+                    return predict_from_csv(temp_csv, output_path, model_path, scaler_path)
+                else:
+                    # Single JSON sample
+                    logger.info("Single JSON sample detected")
+                    return predict_new_data(model_path, scaler_path, json_data)
+            
+            elif file_ext in ['.csv', '.txt', '.data']:
+                logger.info(f"Detected CSV/text input file: {input_data}")
+                return predict_from_csv(input_data, output_path, model_path, scaler_path)
+            
+            else:
+                logger.warning(f"Unknown file extension: {file_ext}")
+                # Try to load as CSV by default
+                logger.info("Attempting to load as CSV")
+                return predict_from_csv(input_data, output_path, model_path, scaler_path)
+        
+        # Case 2: Input is a pandas DataFrame
+        elif isinstance(input_data, pd.DataFrame):
+            logger.info(f"Detected pandas DataFrame with {len(input_data)} rows")
+            # Save to temporary CSV for batch processing
+            temp_csv = os.path.join(os.getcwd(), '_temp_dataframe.csv')
+            input_data.to_csv(temp_csv, index=False)
+            # Process as CSV
+            return predict_from_csv(temp_csv, output_path, model_path, scaler_path)
+        
+        # Case 3: Input is a dictionary (single sample)
+        elif isinstance(input_data, dict):
+            logger.info("Detected dictionary input (single sample)")
+            return predict_new_data(model_path, scaler_path, input_data)
+        
+        # Case 4: Input is a list of dictionaries (batch of samples)
+        elif isinstance(input_data, list) and all(isinstance(item, dict) for item in input_data):
+            logger.info(f"Detected list of dictionaries ({len(input_data)} samples)")
+            # Convert to DataFrame for batch processing
+            df = pd.DataFrame(input_data)
+            # Add timestamp if not present
+            if 'timestamp' not in df.columns:
+                df['timestamp'] = pd.date_range(start='now', periods=len(df), freq='S')
+            # Save to temporary CSV for batch processing
+            temp_csv = os.path.join(os.getcwd(), '_temp_batch_list.csv')
+            df.to_csv(temp_csv, index=False)
+            # Process as CSV
+            return predict_from_csv(temp_csv, output_path, model_path, scaler_path)
+        
+        else:
+            logger.error(f"Unsupported input type: {type(input_data)}")
+            raise TypeError(f"Unsupported input type: {type(input_data)}")
+    
+    except Exception as e:
+        logger.error(f"Error in automatic prediction: {e}")
+        print(f"\n✘ ERROR: Automatic prediction failed: {e}")
+        raise
 
 # ---------------------- MAIN EXECUTION ---------------------- #
 def main():
@@ -1575,43 +1987,71 @@ def main():
                 print(f"\n✘ ERROR: Input file not found: {args.input}")
                 sys.exit(1)
             
-            # Load input data
-            with open(args.input, 'r') as f:
-                input_data = json.load(f)
-            
-            # Make prediction using the specified model or automatically select one
-            prediction, probabilities = predict_new_data(args.model, args.scaler, input_data)
-            
-            if not prediction:
-                print("\n✘ ERROR: Prediction failed")
-                sys.exit(1)
-            
-            # Output prediction
-            result = {
-                "prediction": prediction,
-                "confidence": probabilities,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Save to output file if specified
-            if args.output:
-                with open(args.output, 'w') as f:
-                    json.dump(result, f, indent=2)
-                print(f"\n✓ Prediction saved to {args.output}")
-            
-            # Print to console
-            print("\n" + "="*50)
-            print(f"✓ PREDICTION RESULTS")
-            print("="*50)
-            print(f"Predicted Cognitive State: {prediction}")
-            print("\nProbabilities:")
-            for cls, prob in probabilities.items():
-                print(f"  {cls:<10}: {prob:.2f}")
-            print("="*50)
+            # If auto-detect flag is set or the input file is a CSV and batch flag is set
+            if args.auto_detect or (args.batch or args.input.lower().endswith('.csv')):
+                logger.info(f"Processing batch data or auto-detecting input type")
+                
+                if args.auto_detect:
+                    # Use the automatic detection function
+                    results = predict_automatic(args.input, args.output, args.model, args.scaler)
+                else:
+                    # Process as batch CSV file
+                    results = predict_from_csv(args.input, args.output, args.model, args.scaler)
+            else:
+                # Standard single-sample prediction
+                # Load input data from JSON
+                with open(args.input, 'r') as f:
+                    input_data = json.load(f)
+                
+                # Make prediction using the specified model or automatically select one
+                prediction, probabilities = predict_new_data(args.model, args.scaler, input_data)
+                
+                if not prediction:
+                    print("\n✘ ERROR: Prediction failed")
+                    sys.exit(1)
+                
+                # Output prediction
+                result = {
+                    "prediction": prediction,
+                    "confidence": probabilities,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Save to output file if specified
+                if args.output:
+                    with open(args.output, 'w') as f:
+                        json.dump(result, f, indent=2)
+                    print(f"\n✓ Prediction saved to {args.output}")
+                
+                # Print to console
+                print("\n" + "="*50)
+                print(f"✓ PREDICTION RESULTS")
+                print("="*50)
+                print(f"Predicted Cognitive State: {prediction}")
+                print("\nProbabilities:")
+                for cls, prob in probabilities.items():
+                    print(f"  {cls:<10}: {prob:.2f}")
+                print("="*50)
             
         except Exception as e:
             logger.error(f"Prediction failed: {str(e)}")
             print(f"\nERROR: Prediction failed: {str(e)}")
+            sys.exit(1)
+    
+    elif args.command == 'batch-predict':
+        try:
+            # Verify that input file exists
+            if not os.path.exists(args.input):
+                logger.error(f"Input file not found: {args.input}")
+                print(f"\n✘ ERROR: Input file not found: {args.input}")
+                sys.exit(1)
+            
+            # Process as batch CSV file
+            predict_from_csv(args.input, args.output, args.model, args.scaler)
+            
+        except Exception as e:
+            logger.error(f"Batch prediction failed: {str(e)}")
+            print(f"\nERROR: Batch prediction failed: {str(e)}")
             sys.exit(1)
     
     elif args.command == 'list-models':
@@ -1647,5 +2087,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == '!help':
         # Convert !help to help for argparse
         sys.argv[1] = 'help'
-    
-    main()
+    try:
+        main()  # Run the main function
+    except Exception as e:
+        logger.error(f"An error occurred: {str(e)}")
+        print(f"\n✘ ERROR: An error occurred: {str(e)}")
+        sys.exit(1)

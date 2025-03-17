@@ -32,12 +32,14 @@ This will create executable scripts in the project root for each utility.
 Checks all models in the models directory and verifies that each model has a corresponding scaler file. It can also fix issues by creating new scalers for models that are missing them.
 
 Options:
+
 - `--fix`: Automatically fix scaler issues
 - `--model-dir MODEL_DIR`: Specify the directory containing models
 
 ### generate_sample_data.py
 
 Generates synthetic data files for training and testing:
+
 - Physiological data (heart rate, blood pressure, etc.)
 - EEG data (brain wave measurements)
 - Gaze tracking data (eye movement metrics)
@@ -47,6 +49,7 @@ The data is saved to the `data/` directory.
 ### organize_outputs.py
 
 Organizes model and log files into the proper directory structure:
+
 - Models are organized by type (rf, svm, gb, mlp, knn, lr)
 - Logs are organized by operation type (general, training, prediction, installation)
 
@@ -55,6 +58,7 @@ Organizes model and log files into the proper directory structure:
 Downloads advanced pre-trained models for improved prediction accuracy.
 
 Options:
+
 - `--all`: Download all available advanced models
 - `--model-type TYPE`: Download a specific model type (rf, svm, gb, mlp, knn, lr)
 
@@ -64,4 +68,4 @@ Creates executable shortcuts in the project root for commonly used utilities.
 
 ### test_imports.py
 
-Tests Python imports to ensure all required packages are properly installed. 
+Tests Python imports to ensure all required packages are properly installed.
