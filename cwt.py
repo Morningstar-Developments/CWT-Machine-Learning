@@ -51,6 +51,9 @@ from datetime import datetime
 import argparse
 from pathlib import Path
 import subprocess
+import pickle
+import multiprocessing
+from concurrent.futures import ThreadPool
 
 import pandas as pd
 import numpy as np
@@ -62,7 +65,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import cross_val_score, GridSearchCV
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -519,127 +522,232 @@ def train_model(df, features, model_type='rf', scaler=None):
         logger.error(f"Error during model training: {str(e)}")
         raise
 
-# ---------------------- PREDICTION FUNCTION ---------------------- #
-def predict_new_data(model_path=None, scaler_path=None, new_data=None):
+# ---------------------- PREDICTION FUNCTIONS ---------------------- #
+def predict(data, model_type=None, threshold=None, infer_missing=False):
     """
-    Use a trained model to predict the cognitive state from new data.
+    Predict cognitive workload from input data.
     
     Args:
-        model_path: Path to the trained model file
-        scaler_path: Path to the scaler file used during training
-        new_data: Dictionary containing feature values for prediction
-    
+        data (dict or DataFrame): Input data with features
+        model_type (str, optional): Type of model to use. If None, uses best available model.
+        threshold (float, optional): Confidence threshold for prediction. If None, no threshold is applied.
+        infer_missing (bool, optional): Whether to infer missing features. Defaults to False.
+        
     Returns:
-        Tuple containing predicted class and probabilities
+        dict: Prediction results with workload class and confidence
     """
-    if not new_data:
-        logger.error("No input data provided for prediction")
-        return None, None
-
-    # If model path is not provided, use the latest model
-    if not model_path:
-        # Pass the input data to find_latest_model to select the most appropriate model
-        model_path, scaler_path = find_latest_model(new_data)
+    # Handle missing features if requested
+    if infer_missing:
+        data = infer_missing_features(data)
+    
+    # Convert input to DataFrame if it's a dictionary
+    is_dict_input = isinstance(data, dict)
+    if is_dict_input:
+        df = pd.DataFrame([data])
+    else:
+        df = data.copy()
+    
+    # Find the best model if model_type is not specified
+    if model_type is None:
+        model_path, metadata = find_best_model()
         if not model_path:
-            logger.error("No trained models found and no model path provided")
-            logger.error("Please train a model first using 'python cwt.py train'")
-            return None, None
-            
-    logger.info(f"Using latest model: {model_path}")
+            logger.error("No suitable model found for prediction")
+            raise ValueError("No suitable model found for prediction")
+        model_type = metadata.get('model_type', 'unknown')
+    else:
+        model_path, metadata = find_model_by_type(model_type)
+        if not model_path:
+            logger.error(f"No model found for type: {model_type}")
+            raise ValueError(f"No model found for type: {model_type}")
     
-    if not scaler_path:
-        logger.error(f"Scaler file not found for model {model_path}")
-        return None, None
-        
-    logger.info(f"Using latest scaler: {scaler_path}")
+    # Load the model and scaler
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
     
-    try:
-        # Validate that files exist
-        if not os.path.exists(model_path):
-            error_msg = f"Model file not found: {model_path}"
-            logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
-            
-        if not os.path.exists(scaler_path):
-            error_msg = f"Scaler file not found: {scaler_path}"
-            logger.error(error_msg)
-            # Suggest potential scaler file locations
-            model_dir = os.path.dirname(model_path)
-            potential_scalers = list(Path(model_dir).glob("scaler_*.joblib"))
-            if potential_scalers:
-                logger.info(f"Available scalers in the model directory: {potential_scalers}")
-                logger.info("Try specifying one of these scalers with the --scaler parameter")
-            raise FileNotFoundError(error_msg)
-        
-        logger.info(f"Loading model from {model_path}")
-        model = joblib.load(model_path)
-        
-        logger.info(f"Loading scaler from {scaler_path}")
-        scaler = joblib.load(scaler_path)
-        
-        # Get the feature names used by the scaler
-        if hasattr(scaler, 'feature_names_in_'):
-            scaler_features = scaler.feature_names_in_.tolist()
-            logger.info(f"Scaler was fit with {len(scaler_features)} features")
+    scaler_path = os.path.dirname(model_path) + "/scaler.pkl"
+    if not os.path.exists(scaler_path):
+        # Try to find a shared scaler
+        shared_scaler_path = os.path.join(os.path.dirname(os.path.dirname(model_path)), "shared_scaler.pkl")
+        if os.path.exists(shared_scaler_path):
+            scaler_path = shared_scaler_path
         else:
-            scaler_features = list(new_data.keys())
-            logger.warning("Scaler does not have feature_names_in_ attribute, using input data keys")
-        
-        # Get the feature names used by the model
-        if hasattr(model, 'feature_names_in_'):
-            model_features = model.feature_names_in_.tolist()
-            logger.info(f"Model was trained with {len(model_features)} features")
-        else:
-            # If model doesn't have feature_names_in_, use a predefined list (less reliable)
-            model_features = [
-                "pulse_rate", "blood_pressure_sys", "resp_rate", "pupil_diameter_left",
-                "pupil_diameter_right", "fixation_duration", "blink_rate", 
-                "gaze_x", "gaze_y", "alpha_power", "theta_power"
-            ]
-            logger.warning("Model does not have feature_names_in_ attribute, using default features")
-        
-        # Convert input to DataFrame for scaling
-        input_df = pd.DataFrame([new_data])
-        
-        # Ensure the input has all features needed by the scaler
-        for feature in scaler_features:
-            if feature not in input_df.columns:
-                logger.warning(f"Adding missing feature for scaler: {feature}")
-                input_df[feature] = 0.0
-        
-        # Select only the features the scaler knows about
-        scaler_input = input_df[scaler_features]
-        
-        # Scale the input data
-        scaled_data = scaler.transform(scaler_input)
-        
-        # Create a new DataFrame with the scaled data and the column names
-        scaled_df = pd.DataFrame(scaled_data, columns=scaler_features)
-        
-        # Select only the features the model was trained on
-        model_input = scaled_df[model_features]
-        
-        # Make prediction
-        logger.debug("Making prediction")
-        prediction = model.predict(model_input)
-        
-        # Get class probabilities if model supports it
-        if hasattr(model, 'predict_proba'):
-            prediction_proba = model.predict_proba(model_input)
-            classes = model.classes_
-            proba_dict = {str(cls): float(prob) for cls, prob in zip(classes, prediction_proba[0])}
-        else:
-            # For models that don't support probability
-            proba_dict = {"prediction_confidence": 1.0}
-        
-        logger.info(f"Prediction: {prediction[0]}")
-        logger.debug(f"Class probabilities: {proba_dict}")
-        
-        return prediction[0], proba_dict
+            logger.error(f"No scaler found for model: {model_path}")
+            raise FileNotFoundError(f"No scaler found for model: {model_path}")
     
-    except Exception as e:
-        logger.error(f"Error during prediction: {str(e)}")
-        raise
+    with open(scaler_path, 'rb') as f:
+        scaler = pickle.load(f)
+    
+    # Extract features from metadata
+    features = metadata.get('features', [])
+    
+    # Check for missing features
+    missing_features = [feature for feature in features if feature not in df.columns]
+    if missing_features:
+        logger.warning(f"Missing features for prediction: {missing_features}")
+        if infer_missing:
+            logger.info("These features should have been inferred, but some are still missing")
+        else:
+            logger.warning("Consider using --infer-missing to handle missing features")
+            # Fill missing features with zeros for now
+            for feature in missing_features:
+                df[feature] = 0.0
+    
+    # Prepare data for prediction
+    X = df[features].values
+    X_scaled = scaler.transform(X)
+    
+    # Make prediction
+    if hasattr(model, 'predict_proba'):
+        # Get class probabilities
+        y_proba = model.predict_proba(X_scaled)
+        # Get class predictions
+        y_pred = model.predict(X_scaled)
+        
+        # Get confidences for the predicted classes
+        confidences = [y_proba[i][pred] for i, pred in enumerate(y_pred)]
+    else:
+        # For models without predict_proba, use a placeholder confidence
+        y_pred = model.predict(X_scaled)
+        confidences = [0.99] * len(y_pred)
+    
+    # Apply threshold if specified
+    if threshold is not None:
+        for i, conf in enumerate(confidences):
+            if conf < threshold:
+                y_pred[i] = -1  # Use -1 to indicate low confidence
+    
+    # Create result dictionary
+    results = []
+    for i in range(len(df)):
+        workload_class = int(y_pred[i]) if y_pred[i] != -1 else None
+        workload_label = WORKLOAD_CLASSES.get(workload_class, "Unknown")
+        
+        result = {
+            "workload_class": workload_class,
+            "workload_label": workload_label,
+            "confidence": confidences[i],
+            "model_type": model_type
+        }
+        results.append(result)
+    
+    # Return in the same format as input
+    if is_dict_input:
+        return results[0]
+    else:
+        return results
+
+def predict_batch(file_path, output_file=None, model_type=None, threshold=None, infer_missing=False):
+    """
+    Batch predict cognitive workload from a CSV file.
+    
+    Args:
+        file_path (str): Path to input CSV file
+        output_file (str, optional): Path to output CSV file. If None, results are not saved.
+        model_type (str, optional): Type of model to use. If None, uses best available model.
+        threshold (float, optional): Confidence threshold for prediction. If None, no threshold is applied.
+        infer_missing (bool, optional): Whether to infer missing features. Defaults to False.
+        
+    Returns:
+        DataFrame: Prediction results with workload class and confidence
+    """
+    # Load input data
+    df = pd.read_csv(file_path)
+    logger.info(f"Loaded {len(df)} records from {file_path}")
+    
+    # Handle missing features if requested
+    if infer_missing:
+        logger.info("Inferring missing features")
+        df = infer_missing_features(df)
+    
+    # Make batch prediction
+    results = predict(df, model_type, threshold, infer_missing=False)  # False because we already inferred if needed
+    
+    # Convert results to DataFrame
+    result_df = pd.DataFrame(results)
+    
+    # Combine with original data if requested
+    if output_file:
+        # Combine input data with prediction results
+        output_df = pd.concat([df, result_df], axis=1)
+        
+        # Save to output file
+        output_df.to_csv(output_file, index=False)
+        logger.info(f"Saved prediction results to {output_file}")
+    
+    return result_df
+
+def predict_time_series(file_path, output_file=None, window_size=10, step_size=5, 
+                       model_type=None, threshold=None, infer_missing=False):
+    """
+    Predict cognitive workload from time series data.
+    
+    Args:
+        file_path (str): Path to input CSV file with time series data
+        output_file (str, optional): Path to output CSV file. If None, results are not saved.
+        window_size (int, optional): Size of sliding window in samples. Defaults to 10.
+        step_size (int, optional): Step size for sliding window. Defaults to 5.
+        model_type (str, optional): Type of model to use. If None, uses best available model.
+        threshold (float, optional): Confidence threshold for prediction. If None, no threshold is applied.
+        infer_missing (bool, optional): Whether to infer missing features. Defaults to False.
+        
+    Returns:
+        DataFrame: Time series prediction results
+    """
+    # Load input data
+    df = pd.read_csv(file_path)
+    logger.info(f"Loaded {len(df)} time points from {file_path}")
+    
+    # Handle missing features if requested
+    if infer_missing:
+        logger.info("Inferring missing features in time series data")
+        df = infer_missing_features(df)
+    
+    # Ensure timestamp column exists
+    if "timestamp" not in df.columns:
+        logger.warning("No timestamp column found, creating sequential timestamps")
+        df["timestamp"] = pd.date_range(start="2023-01-01", periods=len(df), freq="S")
+    
+    # Create sliding windows
+    windows = []
+    timestamps = []
+    for i in range(0, len(df) - window_size + 1, step_size):
+        window = df.iloc[i:i+window_size]
+        # Use the last timestamp in the window as the prediction timestamp
+        timestamps.append(window["timestamp"].iloc[-1])
+        windows.append(window)
+    
+    logger.info(f"Created {len(windows)} windows from time series data")
+    
+    # Process each window
+    predictions = []
+    for window in windows:
+        # Aggregate features in the window
+        aggregated = {}
+        for column in window.columns:
+            if column == "timestamp":
+                continue
+            # Use mean for numeric features
+            aggregated[column] = window[column].mean()
+        
+        # Make prediction on aggregated window
+        prediction = predict(aggregated, model_type, threshold, infer_missing=False)
+        predictions.append(prediction)
+    
+    # Create result DataFrame
+    result_df = pd.DataFrame({
+        "timestamp": timestamps,
+        "workload_class": [p["workload_class"] for p in predictions],
+        "workload_label": [p["workload_label"] for p in predictions],
+        "confidence": [p["confidence"] for p in predictions],
+        "model_type": [p["model_type"] for p in predictions]
+    })
+    
+    # Save results if requested
+    if output_file:
+        result_df.to_csv(output_file, index=False)
+        logger.info(f"Saved time series prediction results to {output_file}")
+    
+    return result_df
 
 # ---------------------- SAMPLE MODEL GENERATION ---------------------- #
 def generate_synthetic_data(n_samples=1000, n_features=10, random_state=42):

@@ -113,7 +113,43 @@ python cwt.py list-models
 
 The CWT project follows an organized directory structure:
 
-```
+```bash
+CWT-Learning_Model/
+├── data/                        # Data files for training and prediction
+├── examples/                    # Example files and utilities
+│   └── json_samples/            # Example JSON files for testing
+├── logs/                        # Log files
+│   ├── general/                 # General logs
+│   ├── training/                # Training-specific logs
+│   ├── prediction/              # Prediction-specific logs
+│   └── installation/            # Installation logs
+├── models/                      # Trained models
+│   ├── sample/                  # Models trained on synthetic data
+│   │   ├── default/             # Default models
+│   │   ├── rf/                  # Random Forest models
+│   │   ├── svm/                 # Support Vector Machine models
+│   │   ├── gb/                  # Gradient Boosting models
+│   │   ├── mlp/                 # Neural Network models
+│   │   ├── knn/                 # K-Nearest Neighbors models
+│   │   └── lr/                  # Logistic Regression models
+│   ├── advanced/                # Advanced pre-trained models
+│   │   ├── rf/                  # Advanced Random Forest models
+│   │   ├── svm/                 # Advanced SVM models
+│   │   ├── gb/                  # Advanced Gradient Boosting models
+│   │   ├── mlp/                 # Advanced Neural Network models
+│   │   ├── knn/                 # Advanced KNN models
+│   │   └── lr/                  # Advanced Logistic Regression models
+│   └── visualizations/          # Model performance visualizations
+├── utilities/                   # Helper scripts and utilities
+│   ├── check_models.py          # Script to check model and scaler compatibility
+│   ├── download_advanced_models.py # Script to download advanced models
+│   ├── generate_sample_data.py  # Script to generate sample data
+│   ├── organize_outputs.py      # Script to organize models and logs
+│   └── test_imports.py          # Script to test Python imports
+├── cwt.py                       # Main script
+├── requirements.txt             # Python dependencies
+├── .env                         # Environment configuration
+└── README.md                    # This file
 CWT-Learning_Model/
 ├── data/                        # Data files for training and prediction
 ├── examples/                    # Example files and utilities
