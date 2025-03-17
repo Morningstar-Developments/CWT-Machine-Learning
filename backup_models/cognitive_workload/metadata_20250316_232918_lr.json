@@ -1,0 +1,57 @@
+{
+    "model_version": "20250316_232918_lr",
+    "model_type": "lr",
+    "model_name": "Logistic Regression",
+    "training_date": "2025-03-16T23:29:18.161250",
+    "accuracy": 0.695,
+    "classification_report": {
+        "High": {
+            "precision": 0.6721311475409836,
+            "recall": 0.6833333333333333,
+            "f1-score": 0.6776859504132231,
+            "support": 60.0
+        },
+        "Low": {
+            "precision": 0.6333333333333333,
+            "recall": 0.6440677966101694,
+            "f1-score": 0.6386554621848739,
+            "support": 59.0
+        },
+        "Medium": {
+            "precision": 0.759493670886076,
+            "recall": 0.7407407407407407,
+            "f1-score": 0.75,
+            "support": 81.0
+        },
+        "accuracy": 0.695,
+        "macro avg": {
+            "precision": 0.688319383920131,
+            "recall": 0.6893806235614145,
+            "f1-score": 0.6887804708660323,
+            "support": 200.0
+        },
+        "weighted avg": {
+            "precision": 0.6960676143044892,
+            "recall": 0.695,
+            "f1-score": 0.6954591464685046,
+            "support": 200.0
+        }
+    },
+    "features": [
+        "pulse_rate",
+        "blood_pressure_sys",
+        "resp_rate",
+        "pupil_diameter_left",
+        "pupil_diameter_right",
+        "fixation_duration",
+        "blink_rate",
+        "gaze_x",
+        "gaze_y",
+        "theta_power"
+    ],
+    "parameters": {
+        "test_size": 0.2,
+        "random_seed": 47
+    },
+    "note": "This is a sample model trained on synthetic data for demonstration purposes."
+}

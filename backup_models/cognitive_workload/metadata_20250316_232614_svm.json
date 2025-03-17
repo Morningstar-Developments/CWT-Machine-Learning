@@ -1,0 +1,57 @@
+{
+    "model_version": "20250316_232614_svm",
+    "model_type": "svm",
+    "model_name": "Support Vector Machine",
+    "training_date": "2025-03-16T23:26:14.672658",
+    "accuracy": 0.875,
+    "classification_report": {
+        "High": {
+            "precision": 0.9,
+            "recall": 0.75,
+            "f1-score": 0.8181818181818182,
+            "support": 60.0
+        },
+        "Low": {
+            "precision": 0.8125,
+            "recall": 0.8666666666666667,
+            "f1-score": 0.8387096774193549,
+            "support": 60.0
+        },
+        "Medium": {
+            "precision": 0.9069767441860465,
+            "recall": 0.975,
+            "f1-score": 0.9397590361445783,
+            "support": 80.0
+        },
+        "accuracy": 0.875,
+        "macro avg": {
+            "precision": 0.8731589147286821,
+            "recall": 0.8638888888888889,
+            "f1-score": 0.8655501772485837,
+            "support": 200.0
+        },
+        "weighted avg": {
+            "precision": 0.8765406976744186,
+            "recall": 0.875,
+            "f1-score": 0.8729710631381832,
+            "support": 200.0
+        }
+    },
+    "features": [
+        "pulse_rate",
+        "blood_pressure_sys",
+        "resp_rate",
+        "pupil_diameter_left",
+        "pupil_diameter_right",
+        "fixation_duration",
+        "blink_rate",
+        "gaze_x",
+        "gaze_y",
+        "theta_power"
+    ],
+    "parameters": {
+        "test_size": 0.2,
+        "random_seed": 43
+    },
+    "note": "This is a sample model trained on synthetic data for demonstration purposes."
+}

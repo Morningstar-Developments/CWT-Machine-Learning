@@ -1,0 +1,57 @@
+{
+    "model_version": "20250316_232916_rf",
+    "model_type": "rf",
+    "model_name": "Random Forest",
+    "training_date": "2025-03-16T23:29:17.160729",
+    "accuracy": 0.905,
+    "classification_report": {
+        "High": {
+            "precision": 0.9482758620689655,
+            "recall": 0.9166666666666666,
+            "f1-score": 0.9322033898305084,
+            "support": 60.0
+        },
+        "Low": {
+            "precision": 0.835820895522388,
+            "recall": 0.9333333333333333,
+            "f1-score": 0.8818897637795275,
+            "support": 60.0
+        },
+        "Medium": {
+            "precision": 0.9333333333333333,
+            "recall": 0.875,
+            "f1-score": 0.9032258064516129,
+            "support": 80.0
+        },
+        "accuracy": 0.905,
+        "macro avg": {
+            "precision": 0.9058100303082289,
+            "recall": 0.9083333333333333,
+            "f1-score": 0.9057729866872163,
+            "support": 200.0
+        },
+        "weighted avg": {
+            "precision": 0.9085623606107393,
+            "recall": 0.905,
+            "f1-score": 0.9055182686636559,
+            "support": 200.0
+        }
+    },
+    "features": [
+        "pulse_rate",
+        "blood_pressure_sys",
+        "resp_rate",
+        "pupil_diameter_left",
+        "pupil_diameter_right",
+        "fixation_duration",
+        "blink_rate",
+        "gaze_x",
+        "gaze_y",
+        "theta_power"
+    ],
+    "parameters": {
+        "test_size": 0.2,
+        "random_seed": 42
+    },
+    "note": "This is a sample model trained on synthetic data for demonstration purposes."
+}
