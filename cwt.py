@@ -78,7 +78,7 @@ if os.path.exists('.env'):
 # ---------------------- CONFIGURATION ---------------------- #
 # Set up logging
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-LOG_FILE = os.getenv('LOG_FILE', 'logs/cwt.log')
+LOG_FILE = os.getenv('LOG_FILE', 'logs/general/cwt.log')
 
 # Ensure log directory exists
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
@@ -110,7 +110,7 @@ logger.debug(f"EEG data file path: {DATA_FILES['eeg']}")
 logger.debug(f"Gaze data file path: {DATA_FILES['gaze']}")
 
 # Model configuration
-MODEL_OUTPUT_DIR = os.getenv('MODEL_OUTPUT_DIR', 'models')
+MODEL_OUTPUT_DIR = os.getenv('MODEL_OUTPUT_DIR', 'models/sample/default')
 MODEL_NAME = os.getenv('MODEL_NAME', 'Cognitive_State_Prediction_Model')
 MODEL_VERSION = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -257,7 +257,7 @@ def preprocess_data(df_physio, df_eeg, df_gaze):
         df_gaze (DataFrame): Gaze tracking data
         
     Returns:
-        tuple: Processed dataframe and fitted scaler (df, scaler)
+        tuple: Processed dataframe, fitted scaler, and features (df, scaler, features)
     """
     logger.info("Preprocessing data...")
     
@@ -311,7 +311,11 @@ def preprocess_data(df_physio, df_eeg, df_gaze):
         # Standardization
         logger.debug("Standardizing features")
         scaler = StandardScaler()
-        df[features] = scaler.fit_transform(df[features])
+        scaler.fit(df[features])  # First fit without transforming to get feature_names
+        df[features] = scaler.transform(df[features])
+        
+        # Store feature names in the scaler for prediction
+        scaler.feature_names_in_ = np.array(features)
         
         # Label Encoding for Workload Intensity (Target Variable)
         logger.debug("Encoding cognitive state labels")
@@ -395,8 +399,8 @@ def create_model(model_type='rf'):
             random_state=RANDOM_SEED
         )
 
-# ---------------------- MODEL TRAINING ---------------------- #
-def train_model(df, features, model_type='rf'):
+# ---------------------- MODEL TRAINING FUNCTION ---------------------- #
+def train_model(df, features, model_type='rf', scaler=None):
     """
     Train a machine learning model for cognitive state prediction.
     
@@ -404,6 +408,7 @@ def train_model(df, features, model_type='rf'):
         df (DataFrame): Preprocessed data with features and target
         features (list): List of feature names
         model_type (str): Type of model to train
+        scaler (StandardScaler, optional): Fitted scaler to save with the model
         
     Returns:
         tuple: (trained_model, accuracy, X_test, y_test, y_pred)
@@ -440,23 +445,73 @@ def train_model(df, features, model_type='rf'):
         logger.info(f"Model Accuracy: {accuracy:.3f}")
         logger.info(f"Classification Report:\n {classification_report(y_test, y_pred)}")
         
+        # Create visualization directory if it doesn't exist
+        viz_dir = os.path.join('models', 'visualizations')
+        os.makedirs(viz_dir, exist_ok=True)
+        
         # Plot and save confusion matrix
         logger.debug("Generating confusion matrix")
-        cm_path = os.path.join(MODEL_OUTPUT_DIR, f"confusion_matrix_{MODEL_VERSION}.png")
+        cm_path = os.path.join(viz_dir, f"confusion_matrix_{MODEL_VERSION}.png")
         plot_confusion_matrix(y_test, y_pred, cm_path)
         
         # Plot and save feature importance if model supports it
         if hasattr(model, 'feature_importances_'):
             logger.debug("Generating feature importance plot")
-            fi_path = os.path.join(MODEL_OUTPUT_DIR, f"feature_importance_{MODEL_VERSION}.png")
+            fi_path = os.path.join(viz_dir, f"feature_importance_{MODEL_VERSION}.png")
             plot_feature_importance(model, X.columns, fi_path)
         
-        # Save model, scaler, and metadata
+        # Determine the appropriate model directory based on model_type
+        model_dir = os.path.join(MODEL_OUTPUT_DIR)
+        if model_type in AVAILABLE_MODELS:
+            # Override model_dir if explicitly using a model type to ensure it goes in the right subdirectory
+            model_type_dir = os.path.join('models', 'sample', model_type)
+            os.makedirs(model_type_dir, exist_ok=True)
+            model_dir = model_type_dir
+        
+        # Set up model paths
+        model_filename = f"{MODEL_NAME}_{MODEL_VERSION}_{model_type}.joblib"
+        scaler_filename = f"scaler_{MODEL_VERSION}_{model_type}.joblib"
+        metadata_filename = f"metadata_{MODEL_VERSION}_{model_type}.json"
+        
+        MODEL_OUTPUT_PATH = os.path.join(model_dir, model_filename)
+        SCALER_PATH = os.path.join(model_dir, scaler_filename)
+        METADATA_OUTPUT_PATH = os.path.join(model_dir, metadata_filename)
+        
+        # Save model and scaler
         logger.info(f"Saving model to {MODEL_OUTPUT_PATH}")
         joblib.dump(model, MODEL_OUTPUT_PATH)
         
+        # Create a new scaler if one wasn't provided
+        if scaler is None:
+            logger.warning("No scaler provided, creating a new one")
+            scaler = StandardScaler()
+            scaler.fit(df[features])
+            scaler.feature_names_in_ = np.array(features)
+        
+        logger.info(f"Saving scaler to {SCALER_PATH}")
+        joblib.dump(scaler, SCALER_PATH)
+        
         # Save metadata
-        save_model_metadata(model, model_type, list(X.columns), accuracy, class_report)
+        metadata = {
+            "model_version": MODEL_VERSION,
+            "model_type": model_type,
+            "model_name": AVAILABLE_MODELS.get(model_type, "Unknown"),
+            "training_date": datetime.now().isoformat(),
+            "accuracy": float(accuracy),
+            "classification_report": class_report,
+            "features": list(X.columns),
+            "parameters": {
+                "test_size": TEST_SIZE,
+                "random_seed": RANDOM_SEED
+            }
+        }
+        
+        with open(METADATA_OUTPUT_PATH, 'w') as f:
+            json.dump(metadata, f, indent=4)
+        logger.info(f"Model metadata saved to {METADATA_OUTPUT_PATH}")
+        
+        print(f"Model saved to {MODEL_OUTPUT_PATH}")
+        print(f"Scaler saved to {SCALER_PATH}")
         
         return model, accuracy, X_test, y_test, y_pred
     
@@ -636,24 +691,31 @@ def create_sample_input_json():
 
 def install_sample_model(model_type, model_name_suffix="", random_state=None):
     """
-    Train and install a sample model of the specified type.
+    Install a sample model of the specified type.
     
     Args:
-        model_type (str): Type of model to create
-        model_name_suffix (str): Suffix to add to the model name
-        random_state (int): Random seed for reproducibility
+        model_type (str): Type of model to install
+        model_name_suffix (str): Optional suffix for the model name
+        random_state (int): Random state for reproducibility
         
     Returns:
-        tuple: (model_path, accuracy)
+        tuple: (model_path, scaler_path, accuracy)
     """
     if random_state is None:
         random_state = RANDOM_SEED
     
     # Set up unique version for this model
     model_version = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{model_type}{model_name_suffix}"
-    model_path = os.path.join(MODEL_OUTPUT_DIR, f"{MODEL_NAME}_{model_version}.joblib")
-    scaler_path = os.path.join(MODEL_OUTPUT_DIR, f"scaler_{model_version}.joblib")
-    metadata_path = os.path.join(MODEL_OUTPUT_DIR, f"metadata_{model_version}.json")
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Determine the appropriate directory based on model type
+    model_dir = os.path.join('models', 'sample', model_type)
+    os.makedirs(model_dir, exist_ok=True)
+    
+    model_path = os.path.join(model_dir, f"{MODEL_NAME}_{model_version}.joblib")
+    # Use the exact same timestamp in the scaler filename as in the model filename
+    scaler_path = os.path.join(model_dir, f"scaler_{timestamp}_{model_type}.joblib")
+    metadata_path = os.path.join(model_dir, f"metadata_{timestamp}_{model_type}.json")
     
     logger.info(f"Installing sample model of type: {model_type}")
     
@@ -664,7 +726,15 @@ def install_sample_model(model_type, model_name_suffix="", random_state=None):
         # Create a scaler and fit it to the data
         scaler = StandardScaler()
         features = [col for col in df.columns if col not in ['cognitive_state', 'workload_intensity']]
-        df[features] = scaler.fit_transform(df[features])
+        
+        # First fit without transform to get feature names
+        scaler.fit(df[features])
+        
+        # Store feature names in the scaler for prediction
+        scaler.feature_names_in_ = np.array(features)
+        
+        # Then transform the data
+        df[features] = scaler.transform(df[features])
         
         # Split the data for training and testing
         X = df.drop(columns=["cognitive_state", "workload_intensity"])
@@ -684,7 +754,10 @@ def install_sample_model(model_type, model_name_suffix="", random_state=None):
         
         # Save the model and scaler
         joblib.dump(model, model_path)
+        logger.info(f"Saved model to {model_path}")
+        
         joblib.dump(scaler, scaler_path)
+        logger.info(f"Saved scaler to {scaler_path}")
         
         # Create metadata
         metadata = {
@@ -698,8 +771,7 @@ def install_sample_model(model_type, model_name_suffix="", random_state=None):
             "parameters": {
                 "test_size": 0.2,
                 "random_seed": random_state
-            },
-            "note": "This is a sample model trained on synthetic data for demonstration purposes."
+            }
         }
         
         # Save metadata
@@ -707,8 +779,9 @@ def install_sample_model(model_type, model_name_suffix="", random_state=None):
             json.dump(metadata, f, indent=4)
         
         logger.info(f"Sample model installed at {model_path} with accuracy {accuracy:.3f}")
-        return model_path, accuracy
         
+        return model_path, scaler_path, accuracy
+    
     except Exception as e:
         logger.error(f"Error installing sample model: {str(e)}")
         raise
@@ -731,13 +804,14 @@ def install_sample_models():
             random_seed = RANDOM_SEED + i
             
             print(f"Installing {model_name}...")
-            model_path, accuracy = install_sample_model(model_type, random_state=random_seed)
+            model_path, scaler_path, accuracy = install_sample_model(model_type, random_state=random_seed)
             
             results.append({
                 "type": model_type,
                 "name": model_name,
                 "accuracy": accuracy,
-                "path": model_path
+                "model_path": model_path,
+                "scaler_path": scaler_path
             })
             
             print(f"✓ {model_name} installed (accuracy: {accuracy:.3f})")
@@ -817,104 +891,188 @@ def parse_args():
 
 def find_latest_model():
     """Find the latest trained model in the models directory."""
-    models_path = Path(MODEL_OUTPUT_DIR)
+    # Check multiple directories for models
+    search_dirs = [
+        Path(MODEL_OUTPUT_DIR),  # Check the configured output directory first
+        Path('models/sample/default'),
+        Path('models/sample/rf'),
+        Path('models/sample/svm'),
+        Path('models/sample/gb'),
+        Path('models/sample/mlp'),
+        Path('models/sample/knn'),
+        Path('models/sample/lr'),
+        Path('models/advanced/rf'),
+        Path('models/advanced/svm'),
+        Path('models/advanced/gb'),
+        Path('models/advanced/mlp'),
+        Path('models/advanced/knn'),
+        Path('models/advanced/lr'),
+    ]
     
-    # Create models directory if it doesn't exist
-    os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+    # Create base directories if they don't exist
+    os.makedirs('models/sample/default', exist_ok=True)
     
-    # Look for model files
-    model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
+    # Look for model files in all search directories
+    model_files = []
+    for directory in search_dirs:
+        if directory.exists():
+            model_files.extend(list(directory.glob(f"{MODEL_NAME}_*.joblib")))
     
     if not model_files:
         logger.error("No trained models found")
         return None, None
     
-    # Sort by modification time (newest first)
-    latest_model = sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True)[0]
-    
-    # Extract version information safely
-    try:
-        # Get the timestamp part of the filename
-        model_stem = latest_model.stem  # e.g., "Cognitive_State_Prediction_Model_20230101_120000"
-        parts = model_stem.split('_')
-        
-        # The version should be the date and time parts at the end
-        if len(parts) >= 5:  # Ensure there are enough parts
-            # Join the last two parts which should be date and time
-            model_version = f"{parts[-2]}_{parts[-1]}"
-        else:
-            # Fallback if naming convention is unexpected
-            logger.warning(f"Unexpected model file naming convention: {latest_model.name}")
-            model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
-    except Exception as e:
-        logger.warning(f"Error extracting model version: {str(e)}")
-        model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Look for corresponding scaler file
-    scaler_file = models_path / f"scaler_{model_version}.joblib"
-    
-    if not scaler_file.exists():
-        logger.error(f"Scaler file not found for model {latest_model}")
-        return None, None
-    
+    # Sort by creation time (newest first)
+    latest_model = max(model_files, key=lambda x: x.stat().st_mtime)
     logger.info(f"Found latest model: {latest_model}")
-    logger.info(f"Found corresponding scaler: {scaler_file}")
     
-    return str(latest_model), str(scaler_file)
+    # Find corresponding scaler
+    model_basename = latest_model.stem
+    model_parts = model_basename.split('_')
+    
+    # Try different possible naming patterns for the scaler
+    if len(model_parts) >= 3:  # Should have at least "MODEL_NAME_TIMESTAMP_TYPE"
+        model_type = model_parts[-1]  # Last part should be the model type (rf, svm, etc.)
+        timestamp = model_parts[-2]  # Second to last part should be the timestamp
+        
+        # Try all possible naming patterns for the scaler
+        scaler_patterns = [
+            # Pattern from install_sample_model: "scaler_TIMESTAMP_TYPE.joblib"
+            latest_model.parent / f"scaler_{timestamp}_{model_type}.joblib",
+            
+            # Pattern with just the date part (common in sample models): "scaler_DATEPART_TYPE.joblib"
+            latest_model.parent / f"scaler_{timestamp.split('_')[0]}_{model_type}.joblib",
+            
+            # Simplified pattern: "scaler_TYPE.joblib"
+            latest_model.parent / f"scaler_{model_type}.joblib",
+            
+            # Pattern with just timestamp: "scaler_TIMESTAMP.joblib"
+            latest_model.parent / f"scaler_{timestamp}.joblib",
+            
+            # Try parent directory
+            Path('models') / f"scaler_{timestamp}_{model_type}.joblib",
+            Path('models') / f"scaler_{timestamp}.joblib"
+        ]
+        
+        # Try each pattern
+        for scaler_path in scaler_patterns:
+            if scaler_path.exists():
+                logger.info(f"Found corresponding scaler: {scaler_path}")
+                return str(latest_model), str(scaler_path)
+        
+        # If no pattern matched, log error
+        logger.error(f"Scaler file not found for model {latest_model}")
+        return str(latest_model), None
+    else:
+        logger.error(f"Model filename {latest_model.name} does not follow expected pattern")
+        return str(latest_model), None
 
 def list_available_models():
-    """List all available trained models."""
-    models_path = Path(MODEL_OUTPUT_DIR)
+    """List all available models in the models directory."""
+    print("\n" + "=" * 80)
+    print("AVAILABLE TRAINED MODELS")
+    print("=" * 80)
     
-    # Ensure models directory exists
-    os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+    # Search in all model directories
+    search_dirs = [
+        Path('models/sample/default'),
+        Path('models/sample/rf'),
+        Path('models/sample/svm'),
+        Path('models/sample/gb'),
+        Path('models/sample/mlp'),
+        Path('models/sample/knn'),
+        Path('models/sample/lr'),
+        Path('models/advanced/rf'),
+        Path('models/advanced/svm'),
+        Path('models/advanced/gb'),
+        Path('models/advanced/mlp'),
+        Path('models/advanced/knn'),
+        Path('models/advanced/lr'),
+    ]
     
-    # Find all model files
-    model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
+    model_files = []
+    for directory in search_dirs:
+        if directory.exists():
+            model_files.extend(list(directory.glob("*.joblib")))
     
     if not model_files:
-        print("\n✘ No trained models found")
-        print("\nTo train a new model, run:")
-        print("  python cwt.py train")
-        print("  python cwt.py train --model-type rf")
-        logger.info("No trained models found")
+        print("No trained models found.")
         return
     
-    print("\n✓ Available trained models:")
-    print("-" * 80)
-    print(f"{'Model Name':<50} {'Model Type':<15} {'Accuracy':<10}")
-    print("-" * 80)
+    # Filter out scaler files
+    model_files = [m for m in model_files if not m.stem.startswith("scaler_")]
     
-    for model_file in sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True):
-        # Try to get model type and accuracy from metadata
-        model_type = "Unknown"
-        accuracy = "N/A"
+    # Group by directories
+    models_by_category = {}
+    
+    for model_file in model_files:
+        # Determine the category based on the directory structure
+        if "advanced" in str(model_file):
+            category = "Advanced Models"
+        elif "sample" in str(model_file):
+            category = "Sample Models"
+        else:
+            category = "Other Models"
         
-        try:
-            # Extract version from filename
-            parts = model_file.stem.split('_')
-            if len(parts) >= 5:
-                model_version = f"{parts[-2]}_{parts[-1]}"
-                metadata_file = models_path / f"metadata_{model_version}.json"
+        if category not in models_by_category:
+            models_by_category[category] = []
+        
+        models_by_category[category].append(model_file)
+    
+    # Print models by category
+    for category, files in models_by_category.items():
+        print(f"\n{category}:")
+        print("-" * len(category))
+        
+        # Sort files by modification time (newest first)
+        sorted_files = sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        for model_file in sorted_files:
+            model_name = model_file.name
+            model_time = datetime.fromtimestamp(model_file.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Try to extract model type
+            model_type = "Unknown"
+            if "_rf." in model_name:
+                model_type = "Random Forest"
+            elif "_svm." in model_name:
+                model_type = "Support Vector Machine"
+            elif "_gb." in model_name:
+                model_type = "Gradient Boosting"
+            elif "_mlp." in model_name:
+                model_type = "Neural Network (MLP)"
+            elif "_knn." in model_name:
+                model_type = "K-Nearest Neighbors"
+            elif "_lr." in model_name:
+                model_type = "Logistic Regression"
+            
+            # Look for metadata to get the accuracy
+            accuracy = "Unknown"
+            try:
+                metadata_path = model_file.parent / f"metadata_{model_file.stem.split('_')[-1]}.json"
+                if not metadata_path.exists():
+                    # Try another pattern
+                    metadata_pattern = model_file.parent.glob(f"metadata_*_{model_file.stem.split('_')[-1]}.json")
+                    metadata_files = list(metadata_pattern)
+                    if metadata_files:
+                        metadata_path = metadata_files[0]
                 
-                if metadata_file.exists():
-                    with open(metadata_file, 'r') as f:
+                if metadata_path.exists():
+                    with open(metadata_path, 'r') as f:
                         metadata = json.load(f)
-                    model_type = metadata.get('model_name', "Unknown")
-                    accuracy = f"{float(metadata.get('accuracy', 0)):.3f}"
-        except Exception as e:
-            logger.warning(f"Error reading metadata for {model_file.name}: {str(e)}")
-        
-        print(f"{model_file.name:<50} {model_type:<15} {accuracy:<10}")
+                        if 'accuracy' in metadata:
+                            accuracy = f"{metadata['accuracy']:.3f}"
+            except Exception as e:
+                logger.debug(f"Error reading metadata for {model_file}: {str(e)}")
+            
+            print(f"  - {model_name}")
+            print(f"    Type: {model_type}, Created: {model_time}, Accuracy: {accuracy}")
+            print(f"    Path: {model_file}")
+            print()
     
-    print("\nTo make predictions, run:")
-    print("  python cwt.py predict --input YOUR_DATA.json")
-    
-    print("\nTo train a new model, run one of:")
-    for i, (model_key, model_name) in enumerate(AVAILABLE_MODELS.items()):
-        if i < 3:  # Only show a few examples to keep it simple
-            print(f"  python cwt.py train --model-type {model_key}")
-    print("  (see all options with: python cwt.py train --help)")
+    print("\nTo use a specific model for prediction:")
+    print("python cwt.py predict --input data/sample_input.json --model [model_path]")
+    print("=" * 80)
 
 def display_help(topic=None):
     """Display help information for commands or specific topics."""
@@ -1075,7 +1233,7 @@ MODEL_NAME=Cognitive_State_Prediction_Model
 
 # Logging configuration
 LOG_LEVEL=INFO
-LOG_FILE=logs/cwt.log
+LOG_FILE=logs/general/cwt.log
 
 # Training parameters
 TEST_SIZE=0.2
@@ -1201,7 +1359,7 @@ def main():
             logger.info(f"Scaler saved to {SCALER_OUTPUT_PATH}")
             
             # Train model with specified type
-            model, accuracy, X_test, y_test, y_pred = train_model(df_processed, features, model_type)
+            model, accuracy, X_test, y_test, y_pred = train_model(df_processed, features, model_type, scaler)
             
             logger.info(f"Model training complete. Accuracy: {accuracy:.3f}")
             logger.info(f"Model saved at {MODEL_OUTPUT_PATH}")

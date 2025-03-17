@@ -29,7 +29,11 @@ import shutil
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('logs/installation/download_advanced_models.log')
+    ]
 )
 logger = logging.getLogger("cwt-downloader")
 
@@ -95,7 +99,7 @@ def parse_args():
     parser.add_argument('--all', action='store_true', help='Download all available models')
     parser.add_argument('--model-type', type=str, choices=list(MODEL_REPOSITORIES.keys()),
                        help='Type of model to download (rf, svm, gb, mlp, knn, lr)')
-    parser.add_argument('--output-dir', type=str, default='models',
+    parser.add_argument('--output-dir', type=str, default='models/advanced',
                        help='Directory to save downloaded models')
     return parser.parse_args()
 
@@ -161,13 +165,14 @@ def download_file(url, destination, description):
         logger.error(f"Error downloading {url}: {str(e)}")
         return False
 
-def extract_model_package(zip_path, output_dir):
+def extract_model_package(zip_path, output_dir, model_type):
     """
     Extract a model package zip file to the output directory.
     
     Args:
         zip_path (str): Path to the zip file
         output_dir (str): Directory to extract to
+        model_type (str): Type of model being extracted
     
     Returns:
         bool: True if extraction was successful, False otherwise
@@ -175,31 +180,32 @@ def extract_model_package(zip_path, output_dir):
     try:
         # For demonstration purposes, we'll just create mock files
         # In a real implementation, this would extract actual files from the zip
-        model_type = Path(zip_path).stem.split('_')[0]
         
         # Make sure the output directory exists
-        os.makedirs(output_dir, exist_ok=True)
+        model_type_dir = os.path.join(output_dir, model_type)
+        os.makedirs(model_type_dir, exist_ok=True)
         
         # Create model file
-        model_file = os.path.join(output_dir, f"Advanced_{model_type}_model.joblib")
+        model_file = os.path.join(model_type_dir, f"Advanced_{model_type}_model.joblib")
         with open(model_file, 'w') as f:
             f.write(f"This is a placeholder for the {model_type} model binary file")
         
         # Create scaler file
-        scaler_file = os.path.join(output_dir, f"Advanced_{model_type}_scaler.joblib")
+        scaler_file = os.path.join(model_type_dir, f"Advanced_{model_type}_scaler.joblib")
         with open(scaler_file, 'w') as f:
             f.write(f"This is a placeholder for the {model_type} scaler binary file")
         
         # Create metadata file
-        metadata_file = os.path.join(output_dir, f"Advanced_{model_type}_metadata.json")
+        metadata_file = os.path.join(model_type_dir, f"Advanced_{model_type}_metadata.json")
         metadata = MODEL_METADATA.get(model_type, {})
         metadata["model_path"] = model_file
         metadata["scaler_path"] = scaler_file
+        metadata["note"] = "This is a placeholder for demonstration purposes. In a real implementation, this would be an actual pre-trained model file."
         
         with open(metadata_file, 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        logger.info(f"Extracted model package to {output_dir}")
+        logger.info(f"Extracted model package to {model_type_dir}")
         return True
         
     except Exception as e:
@@ -244,7 +250,7 @@ def download_model(model_type, output_dir):
             return False
         
         # Extract the model
-        if not extract_model_package(zip_path, output_dir):
+        if not extract_model_package(zip_path, output_dir, model_type):
             return False
     
     print(f"\n✓ Successfully installed {metadata.get('name', model_type)} model")
@@ -252,6 +258,9 @@ def download_model(model_type, output_dir):
 
 def main():
     """Main entry point for the script."""
+    # Create necessary log directories
+    os.makedirs('logs/installation', exist_ok=True)
+    
     args = parse_args()
     
     # Create output directory if it doesn't exist
@@ -303,7 +312,7 @@ def main():
             print(f"  - {MODEL_METADATA.get(model_type, {}).get('name', model_type)}")
     
     print("\nTo use these models with CWT, run:")
-    print("  python cwt.py predict --input data/sample_input.json --model models/Advanced_[model_type]_model.joblib --scaler models/Advanced_[model_type]_scaler.joblib")
+    print(f"  python cwt.py predict --input data/sample_input.json --model models/advanced/{models_to_download[0] if models_to_download else 'rf'}/Advanced_{models_to_download[0] if models_to_download else 'rf'}_model.joblib --scaler models/advanced/{models_to_download[0] if models_to_download else 'rf'}/Advanced_{models_to_download[0] if models_to_download else 'rf'}_scaler.joblib")
     print("="*60)
 
 if __name__ == "__main__":

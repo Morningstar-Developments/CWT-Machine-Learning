@@ -100,13 +100,53 @@ These advanced models provide several benefits:
 Use the advanced models for prediction:
 
 ```bash
-python cwt.py predict --input data/sample_input.json --model models/Advanced_gb_model.joblib --scaler models/Advanced_gb_scaler.joblib
+python cwt.py predict --input data/sample_input.json --model models/advanced/gb/Advanced_gb_model.joblib --scaler models/advanced/gb/Advanced_gb_scaler.joblib
 ```
 
 ### Listing Available Models
 
 ```bash
 python cwt.py list-models
+```
+
+## Project Structure
+
+The CWT project follows an organized directory structure:
+
+```
+CWT-Learning_Model/
+├── data/                        # Data files for training and prediction
+├── examples/                    # Example files and utilities
+│   └── json_samples/            # Example JSON files for testing
+├── logs/                        # Log files
+│   ├── general/                 # General logs
+│   ├── training/                # Training-specific logs
+│   ├── prediction/              # Prediction-specific logs
+│   └── installation/            # Installation logs
+├── models/                      # Trained models
+│   ├── sample/                  # Models trained on synthetic data
+│   │   ├── default/             # Default models
+│   │   ├── rf/                  # Random Forest models
+│   │   ├── svm/                 # Support Vector Machine models
+│   │   ├── gb/                  # Gradient Boosting models
+│   │   ├── mlp/                 # Neural Network models
+│   │   ├── knn/                 # K-Nearest Neighbors models
+│   │   └── lr/                  # Logistic Regression models
+│   ├── advanced/                # Advanced pre-trained models
+│   │   ├── rf/                  # Advanced Random Forest models
+│   │   ├── svm/                 # Advanced SVM models
+│   │   ├── gb/                  # Advanced Gradient Boosting models
+│   │   ├── mlp/                 # Advanced Neural Network models
+│   │   ├── knn/                 # Advanced KNN models
+│   │   └── lr/                  # Advanced Logistic Regression models
+│   └── visualizations/          # Model performance visualizations
+├── cwt.py                       # Main script
+├── download_advanced_models.py  # Script to download advanced models
+├── generate_sample_data.py      # Script to generate sample data
+├── organize_outputs.py          # Script to organize models and logs
+├── requirements.txt             # Python dependencies
+├── .env                         # Environment configuration
+└── README.md                    # This file
 ```
 
 ## Data Format
@@ -136,12 +176,12 @@ EEG_DATA_PATH=data/000_EEG_Cluster_ANOVA_Results.csv
 GAZE_DATA_PATH=data/008_01.csv
 
 # Model configuration
-MODEL_OUTPUT_DIR=models
+MODEL_OUTPUT_DIR=models/sample/default
 MODEL_NAME=Cognitive_State_Prediction_Model
 
 # Logging configuration
 LOG_LEVEL=INFO
-LOG_FILE=logs/cwt.log
+LOG_FILE=logs/general/cwt.log
 
 # Training parameters
 TEST_SIZE=0.2
@@ -150,6 +190,20 @@ RANDOM_SEED=42
 # Default model type
 DEFAULT_MODEL_TYPE=rf
 ```
+
+## Organizing Your Models and Logs
+
+If you have existing models and logs that need to be reorganized to match the new directory structure, run:
+
+```bash
+python organize_outputs.py
+```
+
+This script will:
+
+1. Organize model files by type (rf, svm, gb, mlp, knn, lr)
+2. Separate advanced models from sample models
+3. Organize logs by operation type
 
 ## Troubleshooting
 
