@@ -71,7 +71,7 @@ from pathlib import Path
 import subprocess
 import pickle
 import multiprocessing
-from concurrent.futures import ThreadPool
+from concurrent.futures import ThreadPoolExecutor
 
 import tqdm
 
@@ -2902,12 +2902,12 @@ def train_all_models(output_dir=None, parallel=False, skip_types=None):
         num_cores = min(multiprocessing.cpu_count(), len(model_types))
         logger.info(f"Using {num_cores} CPU cores for parallel training")
         
-        with ThreadPool(num_cores) as pool:
+        with ThreadPoolExecutor(max_workers=num_cores) as pool:
             # Prepare arguments for each model
             args = [(model_type, X_scaled, y, features, output_dir) for model_type in model_types]
             
             # Train models in parallel
-            parallel_results = pool.map(_train_model_wrapper, args)
+            parallel_results = list(pool.map(lambda x: _train_model_wrapper(x), args))
             
             # Process results
             for model_type, model_path, accuracy, f1 in parallel_results:
@@ -3026,4 +3026,5 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
         print(f"\n✘ ERROR: An error occurred: {str(e)}")
+        sys.exit(1)
         sys.exit(1)
