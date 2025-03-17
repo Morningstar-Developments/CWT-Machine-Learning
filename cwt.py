@@ -50,6 +50,7 @@ import logging
 from datetime import datetime
 import argparse
 from pathlib import Path
+import subprocess
 
 import pandas as pd
 import numpy as np
@@ -765,6 +766,12 @@ def install_sample_models():
 # ---------------------- COMMAND LINE INTERFACE ---------------------- #
 def parse_args():
     """Parse command line arguments."""
+    # Special case for !help command
+    if len(sys.argv) > 1 and sys.argv[1] == '!help':
+        # Convert !help to help
+        original_args = sys.argv.copy()
+        sys.argv[1] = 'help'
+        
     parser = argparse.ArgumentParser(description='Cognitive Workload Assessment Tool')
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
@@ -779,18 +786,32 @@ def parse_args():
     predict_parser.add_argument('--input', '-i', type=str, required=True, help='JSON file with input data')
     predict_parser.add_argument('--model', '-m', type=str, help='Path to model file')
     predict_parser.add_argument('--scaler', '-s', type=str, help='Path to scaler file')
+    predict_parser.add_argument('--output', '-o', type=str, help='Output file for predictions')
     
     # List models command
     list_parser = subparsers.add_parser('list-models', help='List available trained models')
+    list_parser.add_argument('--detailed', '-d', action='store_true', help='Show detailed model information')
     
     # Install models command
     install_parser = subparsers.add_parser('install-models', help='Install sample pre-trained models')
+    install_parser.add_argument('--force', '-f', action='store_true', help='Force reinstallation of sample models')
     
-    # Handle case where no command is provided
+    # Help command
+    help_parser = subparsers.add_parser('help', help='Show help for all commands')
+    help_parser.add_argument('--topic', '-t', type=str, help='Get help on a specific topic')
+    
+    # Train-from-examples command
+    train_examples_parser = subparsers.add_parser('train-from-examples', help='Train a model using example JSON files')
+    train_examples_parser.add_argument('--model-type', '-m', type=str, default=DEFAULT_MODEL_TYPE,
+                                      choices=list(AVAILABLE_MODELS.keys()),
+                                      help=f'Type of model to train (one of: {", ".join(AVAILABLE_MODELS.keys())})')
+    
+    # Parse arguments
     args = parser.parse_args()
+    
     if args.command is None:
         parser.print_help()
-        parser.exit(1, "Error: No command specified. Use 'train', 'predict', 'list-models', or 'install-models'.\n")
+        parser.exit(1, "Error: No command specified. Use 'help' to see all available commands.\n")
     
     return args
 
@@ -895,6 +916,254 @@ def list_available_models():
             print(f"  python cwt.py train --model-type {model_key}")
     print("  (see all options with: python cwt.py train --help)")
 
+def display_help(topic=None):
+    """Display help information for commands or specific topics."""
+    header = "\n" + "=" * 80 + "\n"
+    header += "COGNITIVE WORKLOAD TOOL (CWT) HELP\n"
+    header += "=" * 80 + "\n"
+    
+    general_help = """
+The Cognitive Workload Tool (CWT) is designed to predict cognitive workload 
+levels based on physiological, EEG, and gaze data. It uses machine learning 
+to classify cognitive states as Low, Medium, or High.
+
+"""
+    
+    commands = {
+        "train": {
+            "description": "Train a new model using data files specified in .env",
+            "usage": "python cwt.py train [--model-type TYPE]",
+            "options": [
+                "--model-type, -m: Type of model to train (rf, svm, gb, mlp, knn, lr)",
+            ],
+            "examples": [
+                "python cwt.py train",
+                "python cwt.py train --model-type rf",
+                "python cwt.py train --model-type svm"
+            ]
+        },
+        "predict": {
+            "description": "Make predictions using a trained model",
+            "usage": "python cwt.py predict --input INPUT_FILE [--model MODEL] [--scaler SCALER] [--output OUTPUT]",
+            "options": [
+                "--input, -i: Input JSON file with feature values",
+                "--model, -m: Path to model file (uses latest model if not specified)",
+                "--scaler, -s: Path to scaler file (uses scaler associated with model if not specified)",
+                "--output, -o: Output file for predictions"
+            ],
+            "examples": [
+                "python cwt.py predict --input data/sample_input.json",
+                "python cwt.py predict --input data/sample_input.json --model models/my_model.joblib"
+            ]
+        },
+        "list-models": {
+            "description": "List available trained models",
+            "usage": "python cwt.py list-models [--detailed]",
+            "options": [
+                "--detailed, -d: Show detailed model information"
+            ],
+            "examples": [
+                "python cwt.py list-models",
+                "python cwt.py list-models --detailed"
+            ]
+        },
+        "install-models": {
+            "description": "Install sample pre-trained models for testing",
+            "usage": "python cwt.py install-models [--force]",
+            "options": [
+                "--force, -f: Force reinstallation of sample models"
+            ],
+            "examples": [
+                "python cwt.py install-models",
+                "python cwt.py install-models --force"
+            ]
+        },
+        "train-from-examples": {
+            "description": "Train a model using example JSON files in examples/json_samples/",
+            "usage": "python cwt.py train-from-examples [--model-type TYPE]",
+            "options": [
+                "--model-type, -m: Type of model to train (rf, svm, gb, mlp, knn, lr)"
+            ],
+            "examples": [
+                "python cwt.py train-from-examples",
+                "python cwt.py train-from-examples --model-type gb"
+            ]
+        },
+        "help": {
+            "description": "Show help for all commands or a specific topic",
+            "usage": "python cwt.py help [--topic TOPIC]",
+            "options": [
+                "--topic, -t: Get help on a specific topic"
+            ],
+            "examples": [
+                "python cwt.py help",
+                "python cwt.py help --topic predict",
+                "python cwt.py !help"
+            ]
+        }
+    }
+    
+    topics = {
+        "model-types": """
+AVAILABLE MODEL TYPES:
+    rf  - Random Forest: Ensemble method that builds multiple decision trees.
+          Good for handling various data types and resistant to overfitting.
+    
+    svm - Support Vector Machine: Finds the hyperplane that best separates classes.
+          Effective in high dimensional spaces but may be slower to train.
+    
+    gb  - Gradient Boosting: Ensemble method that builds trees sequentially.
+          Often achieves high accuracy but may overfit on noisy data.
+    
+    mlp - Neural Network (MLP): Multi-layer perceptron neural network.
+          Flexible model that can capture complex patterns but requires more data.
+    
+    knn - K-Nearest Neighbors: Classification based on closest training examples.
+          Simple but effective algorithm, sensitive to local patterns.
+    
+    lr  - Logistic Regression: Linear model for classification.
+          Fast and interpretable, but may underperform on complex relationships.
+""",
+        "data-format": """
+DATA FORMAT REQUIREMENTS:
+
+For training, the tool expects three CSV files:
+
+1. Physiological data file:
+   - Required columns: timestamp, subject_id, pulse_rate, blood_pressure_sys, resp_rate
+   - Optional: skin_conductance, cognitive_workload (target)
+
+2. EEG data file:
+   - Required columns: timestamp, subject_id, alpha_power, theta_power
+   - Optional: beta_power, delta_power, gamma_power, alpha_theta_ratio
+
+3. Gaze tracking data file:
+   - Required columns: timestamp, subject_id, pupil_diameter_left, pupil_diameter_right,
+     fixation_duration, blink_rate, workload_intensity, gaze_x, gaze_y
+
+For prediction, the tool accepts a JSON file with feature values:
+{
+  "pulse_rate": 75.2,
+  "blood_pressure_sys": 120.5,
+  "resp_rate": 16.4,
+  "pupil_diameter_left": 5.2,
+  "pupil_diameter_right": 5.1,
+  "fixation_duration": 245.8,
+  "blink_rate": 12.3,
+  "workload_intensity": 50.0,
+  "gaze_x": 512.3,
+  "gaze_y": 384.7,
+  "alpha_power": 18.5,
+  "theta_power": 22.6
+}
+
+Example JSON files are provided in the examples/json_samples/ directory.
+""",
+        "configuration": """
+CONFIGURATION:
+
+The tool can be configured using a .env file:
+
+# Data files
+PHYSIO_DATA_PATH=data/Enhanced_Workload_Clinical_Data.csv
+EEG_DATA_PATH=data/000_EEG_Cluster_ANOVA_Results.csv
+GAZE_DATA_PATH=data/008_01.csv
+
+# Model configuration
+MODEL_OUTPUT_DIR=models
+MODEL_NAME=Cognitive_State_Prediction_Model
+
+# Logging configuration
+LOG_LEVEL=INFO
+LOG_FILE=logs/cwt.log
+
+# Training parameters
+TEST_SIZE=0.2
+RANDOM_SEED=42
+CV_FOLDS=5
+
+# Default model type
+DEFAULT_MODEL_TYPE=rf
+
+See .env.example for all available configuration options.
+""",
+        "examples": """
+EXAMPLE USAGE:
+
+1. Generate sample data:
+   python generate_sample_data.py
+
+2. Install sample models:
+   python cwt.py install-models
+
+3. List available models:
+   python cwt.py list-models
+
+4. Make a prediction:
+   python cwt.py predict --input data/sample_input.json
+
+5. Train a new model:
+   python cwt.py train --model-type rf
+
+6. Train a model from JSON examples:
+   python cwt.py train-from-examples
+
+7. Run all example predictions:
+   python examples/predict_examples.py
+
+8. Convert CSV to JSON:
+   python examples/create_json_from_csv.py examples/sample_data.csv
+"""
+    }
+    
+    if topic is None:
+        # General help
+        print(header)
+        print(general_help)
+        
+        print("AVAILABLE COMMANDS:\n")
+        for cmd, info in commands.items():
+            if cmd != "!help":  # Skip the duplicate !help command in the list
+                print(f"  {cmd:<20} {info['description']}")
+        
+        print("\nAVAILABLE HELP TOPICS:\n")
+        for topic, _ in topics.items():
+            print(f"  {topic}")
+        
+        print("\nFor more information on a specific command or topic, use:")
+        print("  python cwt.py help --topic [command or topic]")
+        print("  python cwt.py !help --topic [command or topic]")
+    else:
+        # Command-specific or topic-specific help
+        print(header)
+        
+        if topic in commands:
+            cmd_info = commands[topic]
+            print(f"COMMAND: {topic}\n")
+            print(f"Description: {cmd_info['description']}")
+            print(f"Usage: {cmd_info['usage']}")
+            
+            if cmd_info['options']:
+                print("\nOptions:")
+                for opt in cmd_info['options']:
+                    print(f"  {opt}")
+            
+            if cmd_info['examples']:
+                print("\nExamples:")
+                for ex in cmd_info['examples']:
+                    print(f"  {ex}")
+        elif topic in topics:
+            print(f"TOPIC: {topic}\n")
+            print(topics[topic])
+        else:
+            print(f"Unknown topic: {topic}")
+            print("\nAvailable topics:")
+            for cmd in commands:
+                if cmd != "!help":  # Skip the duplicate !help command in the list
+                    print(f"  {cmd}")
+            for t in topics:
+                print(f"  {t}")
+
 # ---------------------- MAIN EXECUTION ---------------------- #
 def main():
     """Main entry point for the application."""
@@ -985,6 +1254,19 @@ def main():
             prediction, probabilities = predict_new_data(model_path, scaler_path, input_data)
             
             # Output prediction
+            result = {
+                "prediction": prediction,
+                "confidence": probabilities,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Save to output file if specified
+            if args.output:
+                with open(args.output, 'w') as f:
+                    json.dump(result, f, indent=2)
+                print(f"\n✓ Prediction saved to {args.output}")
+            
+            # Print to console
             print("\n" + "="*50)
             print(f"✓ PREDICTION RESULTS")
             print("="*50)
@@ -1005,10 +1287,32 @@ def main():
     elif args.command == 'install-models':
         install_sample_models()
     
+    elif args.command in ['help', '!help']:
+        display_help(args.topic)
+    
+    elif args.command == 'train-from-examples':
+        # Execute the train_from_examples.py script with the given model type
+        examples_script = Path(__file__).resolve().parent / "examples" / "train_from_examples.py"
+        if not examples_script.exists():
+            print("\n✘ ERROR: examples/train_from_examples.py script not found")
+            print("Please ensure the examples directory is set up correctly.")
+            sys.exit(1)
+        
+        cmd = [sys.executable, str(examples_script)]
+        if args.model_type:
+            cmd.extend(["--model-type", args.model_type])
+        
+        subprocess.run(cmd)
+    
     else:
         logger.error(f"Unknown command: {args.command}")
-        logger.error("Use 'train', 'predict', 'list-models', or 'install-models'.")
+        logger.error("Use 'help' to see all available commands.")
         sys.exit(1)
 
 if __name__ == "__main__":
+    # Special case for !help command
+    if len(sys.argv) > 1 and sys.argv[1] == '!help':
+        # Convert !help to help for argparse
+        sys.argv[1] = 'help'
+    
     main()

@@ -62,6 +62,7 @@ python examples/predict_examples.py
 ```
 
 This will:
+
 1. Process each example JSON file
 2. Run predictions using the CWT tool
 3. Display the results
@@ -69,6 +70,7 @@ This will:
 ### Understanding the Results
 
 When you run predictions, the tool will output:
+
 - The predicted cognitive workload state (Low, Medium, High)
 - Confidence scores for each possible state
 - The model used for prediction
@@ -89,10 +91,11 @@ To create your own input files:
 ## Feature Importance
 
 The most important features for prediction, based on the default Random Forest model, are typically:
+
 - workload_intensity
 - theta_power
 - alpha_power
 - pupil_diameter_left
 - pupil_diameter_right
 
-Including accurate values for these features is particularly important for accurate predictions. 
+Including accurate values for these features is particularly important for accurate predictions.

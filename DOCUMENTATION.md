@@ -125,6 +125,7 @@ print(model_info)
 The tool expects three CSV files with the following features:
 
 #### Physiological Data
+
 - `timestamp`: Time of measurement
 - `subject_id`: Participant identifier
 - `pulse_rate`: Heart rate in BPM
@@ -135,6 +136,7 @@ The tool expects three CSV files with the following features:
 - `cognitive_workload`: Target variable (Low, Medium, High)
 
 #### EEG Data
+
 - `timestamp`: Time of measurement
 - `subject_id`: Participant identifier
 - `alpha_power`: Alpha wave power
@@ -145,6 +147,7 @@ The tool expects three CSV files with the following features:
 - `alpha_theta_ratio`: Ratio of alpha to theta power
 
 #### Gaze Tracking Data
+
 - `timestamp`: Time of measurement
 - `subject_id`: Participant identifier
 - `pupil_diameter_left`: Left pupil diameter in mm
@@ -260,19 +263,25 @@ LR_MAX_ITER=100
 ## Troubleshooting Common Issues
 
 ### Missing Features
+
 If your prediction input is missing some features, the tool will try to make a prediction using available features, but accuracy may be reduced.
 
 ### Data Synchronization
+
 When training, ensure that timestamps in different data sources are aligned. The tool will attempt to synchronize data based on timestamps, but manual verification is recommended.
 
 ### Out of Memory Errors
+
 If you encounter memory issues with large datasets, try:
+
 1. Reducing the number of features
 2. Using a subset of the data
 3. Setting `CREATE_INTERACTION_FEATURES=false` in the .env file
 
 ### Performance Optimization
+
 For faster training and prediction:
+
 1. Use simpler models (like Random Forest with fewer estimators)
 2. Reduce the number of features by setting `DROP_CORRELATED_FEATURES=true`
-3. Use a smaller test size and fewer CV folds 
+3. Use a smaller test size and fewer CV folds
