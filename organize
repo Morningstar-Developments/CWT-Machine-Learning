@@ -1,0 +1,3 @@
+#!/bin/bash
+# Organize models and logs into proper directories
+python utilities/organize_outputs.py "$@"

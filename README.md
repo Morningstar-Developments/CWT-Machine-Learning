@@ -84,10 +84,10 @@ To improve prediction accuracy, you can download advanced pre-trained models:
 
 ```bash
 # Download all advanced models
-python utilities/download_advanced_models.py --all
+./download-models --all
 
 # Download a specific model type
-python utilities/download_advanced_models.py --model-type gb
+./download-models --model-type gb
 ```
 
 These advanced models provide several benefits:
@@ -152,6 +152,24 @@ CWT-Learning_Model/
 └── README.md                    # This file
 ```
 
+## Utility Shortcuts
+
+The CWT comes with several utility scripts that can be executed directly from the root directory:
+
+| Shortcut | Description | Usage |
+|----------|-------------|-------|
+| `./check-models` | Check model and scaler compatibility | `./check-models` or `./check-models --fix` |
+| `./generate-data` | Generate sample data files | `./generate-data` |
+| `./organize` | Organize models and logs | `./organize` |
+| `./download-models` | Download advanced models | `./download-models --all` or `./download-models --model-type gb` |
+| `./!help` | Display help information | `./!help` or `./!help --topic model-types` |
+
+To set up these shortcuts (or recreate them if needed), run:
+
+```bash
+python utilities/setup_links.py
+```
+
 ## Data Format
 
 The tool expects data in the following format:
@@ -165,7 +183,7 @@ Each data file should include a timestamp column for synchronization.
 Sample data can be generated using:
 
 ```bash
-python utilities/generate_sample_data.py
+./generate-data
 ```
 
 ## Configuration
@@ -239,20 +257,20 @@ If you encounter errors related to scaler files not being found:
    python cwt.py install-models
    ```
 
-4. Run the organize_outputs.py script to organize your models and scalers:
+4. Run the organize script to organize your models and scalers:
 
    ```bash
-   python utilities/organize_outputs.py
+   ./organize
    ```
 
-5. Use the check_models.py diagnostic tool:
+5. Use the check-models utility:
 
    ```bash
    # Check all models and their scalers
-   ./utilities/check_models.py
+   ./check-models
    
    # Automatically fix scaler issues
-   ./utilities/check_models.py --fix
+   ./check-models --fix
    ```
 
    This tool will identify models missing scalers and create them automatically when run with the `--fix` flag.
