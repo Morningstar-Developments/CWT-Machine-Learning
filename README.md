@@ -84,10 +84,10 @@ To improve prediction accuracy, you can download advanced pre-trained models:
 
 ```bash
 # Download all advanced models
-python download_advanced_models.py --all
+python utilities/download_advanced_models.py --all
 
 # Download a specific model type
-python download_advanced_models.py --model-type gb
+python utilities/download_advanced_models.py --model-type gb
 ```
 
 These advanced models provide several benefits:
@@ -140,10 +140,13 @@ CWT-Learning_Model/
 │   │   ├── knn/                 # Advanced KNN models
 │   │   └── lr/                  # Advanced Logistic Regression models
 │   └── visualizations/          # Model performance visualizations
+├── utilities/                   # Helper scripts and utilities
+│   ├── check_models.py          # Script to check model and scaler compatibility
+│   ├── download_advanced_models.py # Script to download advanced models
+│   ├── generate_sample_data.py  # Script to generate sample data
+│   ├── organize_outputs.py      # Script to organize models and logs
+│   └── test_imports.py          # Script to test Python imports
 ├── cwt.py                       # Main script
-├── download_advanced_models.py  # Script to download advanced models
-├── generate_sample_data.py      # Script to generate sample data
-├── organize_outputs.py          # Script to organize models and logs
 ├── requirements.txt             # Python dependencies
 ├── .env                         # Environment configuration
 └── README.md                    # This file
@@ -162,7 +165,7 @@ Each data file should include a timestamp column for synchronization.
 Sample data can be generated using:
 
 ```bash
-python generate_sample_data.py
+python utilities/generate_sample_data.py
 ```
 
 ## Configuration
@@ -196,7 +199,7 @@ DEFAULT_MODEL_TYPE=rf
 If you have existing models and logs that need to be reorganized to match the new directory structure, run:
 
 ```bash
-python organize_outputs.py
+python utilities/organize_outputs.py
 ```
 
 This script will:
@@ -239,17 +242,17 @@ If you encounter errors related to scaler files not being found:
 4. Run the organize_outputs.py script to organize your models and scalers:
 
    ```bash
-   python organize_outputs.py
+   python utilities/organize_outputs.py
    ```
 
 5. Use the check_models.py diagnostic tool:
 
    ```bash
    # Check all models and their scalers
-   ./check_models.py
+   ./utilities/check_models.py
    
    # Automatically fix scaler issues
-   ./check_models.py --fix
+   ./utilities/check_models.py --fix
    ```
 
    This tool will identify models missing scalers and create them automatically when run with the `--fix` flag.
