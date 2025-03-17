@@ -1,6 +1,6 @@
-# Cognitive Workload Assessment Tool (CWT)
+# Cognitive Workload Training (CWT) Tool
 
-This tool implements a machine learning pipeline for predicting cognitive workload states based on physiological, EEG, and gaze tracking data. The tool can be used to classify cognitive states as Low, Medium, or High.
+A comprehensive tool for training machine learning models to detect and classify cognitive workload levels based on physiological and behavioral metrics.
 
 ## Features
 
@@ -16,6 +16,95 @@ This tool implements a machine learning pipeline for predicting cognitive worklo
 - Model persistence and metadata tracking
 - Visualization of model performance
 - Pre-trained sample models for immediate use
+
+## Recent Enhancements
+
+The CWT Tool has been enhanced with the following new features:
+
+1. **Unified Training Command**: A new `train-all` command allows training all model types in a single operation.
+   - Options to train in parallel for faster execution
+   - Ability to skip specific model types
+   - Shared scaler to ensure consistent scaling across models
+
+2. **Feature Inference Capabilities**: The system can now handle missing features by inferring them from available data.
+   - Specialized inference for pupil metrics, EEG signals, and workload intensity
+   - Uses physiological correlations from reference data
+   - Falls back to synthetic reference data generation when needed
+
+3. **Confidence Thresholds**: Prediction functions now support confidence thresholds to improve reliability.
+   - Predictions below the specified threshold are marked as uncertain
+   - Enhances the quality of workload predictions
+
+4. **Enhanced Batch Processing**: Improved capabilities for processing files with multiple data points.
+   - Better support for CSV files with missing features
+   - Time series analysis with sliding window approach
+   - Visualization options for time series predictions
+
+## Working with Missing Features
+
+The CWT Tool can now handle data with missing features by using the `--infer-missing` flag:
+
+```bash
+python cwt.py predict --input-json data/incomplete_sample.json --infer-missing
+```
+
+This works by:
+1. Detecting which features are missing
+2. Loading reference data to understand feature correlations
+3. Using specialized algorithms to infer the missing values
+4. Applying the standard prediction pipeline with the complete dataset
+
+## Command Reference
+
+### train-all
+
+```bash
+python cwt.py train-all [--output-dir DIR] [--parallel] [--skip-types TYPE1,TYPE2]
+```
+
+- `--output-dir`: Directory to save trained models (default: models/)
+- `--parallel`: Train models in parallel for faster execution
+- `--skip-types`: Comma-separated list of model types to skip (e.g., "svm,knn")
+
+### predict
+
+```bash
+python cwt.py predict [--input-json FILE] [--input-values KEY=VALUE...] [--model-type TYPE] [--threshold FLOAT] [--infer-missing] [--output-json FILE]
+```
+
+### batch-predict
+
+```bash
+python cwt.py batch-predict --input-file FILE [--output-file FILE] [--model-type TYPE] [--threshold FLOAT] [--infer-missing]
+```
+
+### time-series-predict
+
+```bash
+python cwt.py time-series-predict --input-file FILE [--output-file FILE] [--window-size INT] [--step-size INT] [--model-type TYPE] [--threshold FLOAT] [--infer-missing] [--visualize]
+```
+
+## Example Script
+
+An example script `example.sh` is provided to demonstrate the key features:
+
+```bash
+# Make it executable
+chmod +x example.sh
+
+# Run the example
+./example.sh
+```
+
+## Reference Data
+
+To improve feature inference accuracy, you can provide custom reference data:
+
+```
+data/reference/cognitive_workload_reference.csv
+```
+
+This file should contain representative samples with all the features used by the models.
 
 ## Installation
 
@@ -39,6 +128,12 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+4. Initialize the environment:
+
+```bash
+python cwt.py setup
+```
+
 ## Usage
 
 The CWT provides a command-line interface with several commands:
@@ -53,23 +148,42 @@ python cwt.py help
 
 ### Training a Model
 
+Train a specific model type:
+
 ```bash
-python cwt.py train --model-type rf
+python cwt.py train --model-type svm
 ```
 
-Available model types:
+Train all available model types:
 
-- `rf` - Random Forest
-- `svm` - Support Vector Machine
-- `gb` - Gradient Boosting
-- `mlp` - Neural Network (MLP)
-- `knn` - K-Nearest Neighbors
-- `lr` - Logistic Regression
+```bash
+python cwt.py train-all --output-dir models/ensemble --parallel
+```
 
 ### Making Predictions
 
+Predict with explicit input values:
+
 ```bash
-python cwt.py predict --input data/sample_input.json
+python cwt.py predict --input-values "pulse_rate=75" "blood_pressure_sys=120" "resp_rate=16"
+```
+
+Predict from JSON file:
+
+```bash
+python cwt.py predict --input-json data/sample_input.json --model-type mlp
+```
+
+Batch predict from CSV with feature inference:
+
+```bash
+python cwt.py batch-predict --input-file data/batch_samples.csv --output-file results.csv --infer-missing
+```
+
+Time series analysis:
+
+```bash
+python cwt.py time-series-predict --input-file data/time_series.csv --window-size 10 --step-size 5 --visualize
 ```
 
 ### Installing Sample Models
@@ -114,42 +228,6 @@ python cwt.py list-models
 The CWT project follows an organized directory structure:
 
 ```bash
-CWT-Learning_Model/
-├── data/                        # Data files for training and prediction
-├── examples/                    # Example files and utilities
-│   └── json_samples/            # Example JSON files for testing
-├── logs/                        # Log files
-│   ├── general/                 # General logs
-│   ├── training/                # Training-specific logs
-│   ├── prediction/              # Prediction-specific logs
-│   └── installation/            # Installation logs
-├── models/                      # Trained models
-│   ├── sample/                  # Models trained on synthetic data
-│   │   ├── default/             # Default models
-│   │   ├── rf/                  # Random Forest models
-│   │   ├── svm/                 # Support Vector Machine models
-│   │   ├── gb/                  # Gradient Boosting models
-│   │   ├── mlp/                 # Neural Network models
-│   │   ├── knn/                 # K-Nearest Neighbors models
-│   │   └── lr/                  # Logistic Regression models
-│   ├── advanced/                # Advanced pre-trained models
-│   │   ├── rf/                  # Advanced Random Forest models
-│   │   ├── svm/                 # Advanced SVM models
-│   │   ├── gb/                  # Advanced Gradient Boosting models
-│   │   ├── mlp/                 # Advanced Neural Network models
-│   │   ├── knn/                 # Advanced KNN models
-│   │   └── lr/                  # Advanced Logistic Regression models
-│   └── visualizations/          # Model performance visualizations
-├── utilities/                   # Helper scripts and utilities
-│   ├── check_models.py          # Script to check model and scaler compatibility
-│   ├── download_advanced_models.py # Script to download advanced models
-│   ├── generate_sample_data.py  # Script to generate sample data
-│   ├── organize_outputs.py      # Script to organize models and logs
-│   └── test_imports.py          # Script to test Python imports
-├── cwt.py                       # Main script
-├── requirements.txt             # Python dependencies
-├── .env                         # Environment configuration
-└── README.md                    # This file
 CWT-Learning_Model/
 ├── data/                        # Data files for training and prediction
 ├── examples/                    # Example files and utilities

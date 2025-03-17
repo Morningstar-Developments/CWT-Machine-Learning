@@ -47,18 +47,16 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime
 import argparse
-from pathlib import Path
-import subprocess
-import pickle
-import multiprocessing
-from concurrent.futures import ThreadPool
-
-import pandas as pd
-import numpy as np
+import datetime
+from dotenv import load_dotenv
 import joblib
-from sklearn.model_selection import train_test_split
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.calibration import LabelEncoder
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
@@ -69,10 +67,41 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.model_selection import cross_val_score, GridSearchCV
 import matplotlib.pyplot as plt
 import seaborn as sns
-from tqdm import tqdm
-from dotenv import load_dotenv
-from sklearn.datasets import make_classification
-from sklearn.preprocessing import LabelEncoder
+from pathlib import Path
+import subprocess
+import pickle
+import multiprocessing
+from concurrent.futures import ThreadPool
+
+import tqdm
+
+from predictor.predictor import predict_new_data
+
+# Define constants
+MODEL_DIR = "models"
+DATA_FILES = {
+    "physiological": "data/physiological.csv",
+    "eeg": "data/eeg.csv",
+    "gaze": "data/gaze.csv"
+}
+
+# Workload class definitions
+WORKLOAD_CLASSES = {
+    0: "Low",
+    1: "Medium",
+    2: "High"
+}
+
+# Define required features for interactive input
+REQUIRED_FEATURES = [
+    "pulse_rate", "blood_pressure_sys", "resp_rate", 
+    "pupil_diameter_left", "pupil_diameter_right", 
+    "fixation_duration", "blink_rate", "gaze_x", "gaze_y", 
+    "alpha_power", "theta_power"
+]
+
+# Set up logging
+logger = None
 
 # Load environment variables if .env file exists
 if os.path.exists('.env'):
@@ -138,6 +167,9 @@ RANDOM_SEED = int(os.getenv('RANDOM_SEED', 42))
 MODEL_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"{MODEL_NAME}_{MODEL_VERSION}.joblib")
 SCALER_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"scaler_{MODEL_VERSION}.joblib")
 METADATA_OUTPUT_PATH = os.path.join(MODEL_OUTPUT_DIR, f"metadata_{MODEL_VERSION}.json")
+
+# Define the directory for storing models
+MODEL_DIR = os.path.join(os.path.expanduser("~"), ".cwt", "models")
 
 # ---------------------- HELPER FUNCTIONS ---------------------- #
 def validate_file_exists(file_path):
@@ -985,83 +1017,61 @@ def install_sample_models():
 
 # ---------------------- COMMAND LINE INTERFACE ---------------------- #
 def parse_args():
-    """Parse command line arguments."""
-    # Special case for !help command
-    if len(sys.argv) > 1 and sys.argv[1] == '!help':
-        # Convert !help to help
-        original_args = sys.argv.copy()
-        sys.argv[1] = 'help'
-        
-    parser = argparse.ArgumentParser(description='Cognitive Workload Assessment Tool')
-    subparsers = parser.add_subparsers(dest='command', help='Command to run')
+    """
+    Parse command line arguments.
+    
+    Returns:
+        Namespace: Parsed arguments
+    """
+    parser = argparse.ArgumentParser(description="Cognitive Workload Training (CWT) Tool")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    
+    # Define subparsers for commands
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    
+    # Setup command
+    setup_parser = subparsers.add_parser("setup", help="Setup the CWT environment")
     
     # Train command
-    train_parser = subparsers.add_parser('train', help='Train a new model')
-    train_parser.add_argument('--model-type', '-m', type=str, default=DEFAULT_MODEL_TYPE,
-                             choices=list(AVAILABLE_MODELS.keys()),
-                             help=f'Type of model to train (one of: {", ".join(AVAILABLE_MODELS.keys())})')
+    train_parser = subparsers.add_parser("train", help="Train a cognitive workload model")
+    train_parser.add_argument("--model-type", type=str, help="Type of model to train (svm, random_forest, etc.)")
+    train_parser.add_argument("--output-dir", type=str, help="Directory to save the trained model")
     
-    # Train All command - trains models of all types at once
-    train_all_parser = subparsers.add_parser('train-all', help='Train models of all available types')
-    train_all_parser.add_argument('--output-dir', '-o', type=str, 
-                                 help='Directory to save all trained models (default: models/ensemble)')
-    train_all_parser.add_argument('--parallel', '-p', action='store_true', 
-                                 help='Train models in parallel for faster execution')
-    train_all_parser.add_argument('--skip-types', '-s', type=str, nargs='+',
-                                 help='Model types to skip during training')
+    # Train All command
+    train_all_parser = subparsers.add_parser("train-all", help="Train all available cognitive workload models")
+    train_all_parser.add_argument("--output-dir", type=str, help="Directory to save the trained models")
+    train_all_parser.add_argument("--parallel", action="store_true", help="Train models in parallel")
+    train_all_parser.add_argument("--skip-types", type=str, help="Comma-separated list of model types to skip")
     
     # Predict command
-    predict_parser = subparsers.add_parser('predict', help='Make predictions with a trained model')
-    predict_parser.add_argument('--input', '-i', type=str, required=True, help='JSON or CSV file with input data')
-    predict_parser.add_argument('--model', '-m', type=str, help='Path to model file')
-    predict_parser.add_argument('--scaler', '-s', type=str, help='Path to scaler file')
-    predict_parser.add_argument('--output', '-o', type=str, help='Output file for predictions')
-    predict_parser.add_argument('--batch', '-b', action='store_true', help='Process input as batch data')
-    predict_parser.add_argument('--time-series', '-t', action='store_true', help='Treat data as time series')
-    predict_parser.add_argument('--auto-detect', '-a', action='store_true', help='Auto-detect input type and format')
-    predict_parser.add_argument('--threshold', '-th', type=float, default=0.0,
-                              help='Confidence threshold for predictions (0.0-1.0)')
-    predict_parser.add_argument('--infer-missing', '-im', action='store_true',
-                              help='Infer missing features based on available data')
+    predict_parser = subparsers.add_parser("predict", help="Predict cognitive workload from input data")
+    predict_parser.add_argument("--input-json", type=str, help="JSON file with input data")
+    predict_parser.add_argument("--input-values", type=str, nargs="+", help="Input values in key=value format")
+    predict_parser.add_argument("--output-json", type=str, help="JSON file to save prediction results")
+    predict_parser.add_argument("--model-type", type=str, help="Type of model to use for prediction")
+    predict_parser.add_argument("--threshold", type=float, help="Confidence threshold for prediction")
+    predict_parser.add_argument("--infer-missing", action="store_true", help="Infer missing features from available data")
     
-    # Batch predict command (dedicated to batch processing)
-    batch_parser = subparsers.add_parser('batch-predict', help='Process multiple data points for prediction')
-    batch_parser.add_argument('--input', '-i', type=str, required=True, help='CSV file with multiple data points')
-    batch_parser.add_argument('--model', '-m', type=str, help='Path to model file')
-    batch_parser.add_argument('--scaler', '-s', type=str, help='Path to scaler file')
-    batch_parser.add_argument('--output', '-o', type=str, help='Output file for predictions')
-    batch_parser.add_argument('--time-series', '-t', action='store_true', help='Treat data as time series')
-    batch_parser.add_argument('--threshold', '-th', type=float, default=0.0,
-                             help='Confidence threshold for predictions (0.0-1.0)')
-    batch_parser.add_argument('--infer-missing', '-im', action='store_true',
-                             help='Infer missing features based on available data')
+    # Batch predict command
+    batch_predict_parser = subparsers.add_parser("batch-predict", help="Batch predict cognitive workload from a CSV file")
+    batch_predict_parser.add_argument("--input-file", type=str, help="Input CSV file with feature values")
+    batch_predict_parser.add_argument("--output-file", type=str, help="Output CSV file to save prediction results")
+    batch_predict_parser.add_argument("--model-type", type=str, help="Type of model to use for prediction")
+    batch_predict_parser.add_argument("--threshold", type=float, help="Confidence threshold for prediction")
+    batch_predict_parser.add_argument("--infer-missing", action="store_true", help="Infer missing features from available data")
     
-    # List models command
-    list_parser = subparsers.add_parser('list-models', help='List available trained models')
-    list_parser.add_argument('--detailed', '-d', action='store_true', help='Show detailed model information')
+    # Time series predict command
+    time_series_parser = subparsers.add_parser("time-series-predict", help="Predict cognitive workload from time series data")
+    time_series_parser.add_argument("--input-file", type=str, help="Input CSV file with time series data")
+    time_series_parser.add_argument("--output-file", type=str, help="Output CSV file to save prediction results")
+    time_series_parser.add_argument("--window-size", type=int, default=10, help="Size of sliding window in samples")
+    time_series_parser.add_argument("--step-size", type=int, default=5, help="Step size for sliding window")
+    time_series_parser.add_argument("--model-type", type=str, help="Type of model to use for prediction")
+    time_series_parser.add_argument("--threshold", type=float, help="Confidence threshold for prediction")
+    time_series_parser.add_argument("--visualize", action="store_true", help="Visualize time series prediction results")
+    time_series_parser.add_argument("--infer-missing", action="store_true", help="Infer missing features from available data")
     
-    # Install models command
-    install_parser = subparsers.add_parser('install-models', help='Install sample pre-trained models')
-    install_parser.add_argument('--force', '-f', action='store_true', help='Force reinstallation of sample models')
-    
-    # Help command
-    help_parser = subparsers.add_parser('help', help='Show help for all commands')
-    help_parser.add_argument('--topic', '-t', type=str, help='Get help on a specific topic')
-    
-    # Train-from-examples command
-    train_examples_parser = subparsers.add_parser('train-from-examples', help='Train a model using example JSON files')
-    train_examples_parser.add_argument('--model-type', '-m', type=str, default=DEFAULT_MODEL_TYPE,
-                                      choices=list(AVAILABLE_MODELS.keys()),
-                                      help=f'Type of model to train (one of: {", ".join(AVAILABLE_MODELS.keys())})')
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    if args.command is None:
-        parser.print_help()
-        parser.exit(1, "Error: No command specified. Use 'help' to see all available commands.\n")
-    
-    return args
+    return parser.parse_args()
 
 def find_latest_model(input_data=None):
     """
@@ -2482,165 +2492,529 @@ def impute_generic_feature(df, feature, reference_data):
 
 # ---------------------- MAIN EXECUTION ---------------------- #
 def main():
-    """Main entry point for the application."""
+    """
+    Main entry point for the Cognitive Workload Training (CWT) command line interface.
+    """
+    setup_logging()
     args = parse_args()
     
-    if args.command == 'train':
-        logger.info("Starting model training pipeline")
-        
-        # Get model type from arguments
-        model_type = args.model_type
-        logger.info(f"Selected model type: {model_type} ({AVAILABLE_MODELS.get(model_type, 'Unknown')})")
-        
-        try:
-            # Check if data files exist before proceeding
-            for data_type, file_path in DATA_FILES.items():
-                if not os.path.exists(file_path):
-                    logger.error(f"{data_type.capitalize()} data file not found: {file_path}")
-                    print(f"\n✘ Data file missing: {file_path}")
-                    print("\nSince real data is missing, you have two options:")
-                    print("  1. Run 'python cwt.py install-models' to install sample models")
-                    print("  2. Create a 'data' folder with the required files")
-                    print("     or modify paths in your .env file")
-                    print("\nRecommended action:")
-                    print("  python cwt.py install-models")
-                    sys.exit(1)
+    try:
+        # Setup
+        if args.command == "setup":
+            # Ensure model directory exists
+            os.makedirs(MODEL_DIR, exist_ok=True)
+            logger.info(f"Model directory: {MODEL_DIR}")
+            logger.info("Setup complete!")
             
-            # Load data
-            df_physio, df_eeg, df_gaze = load_data()
+        # Train command
+        elif args.command == "train":
+            # Validate input parameters
+            if not args.model_type:
+                logger.error("No model type specified!")
+                logger.info("Available model types: svm, random_forest, mlp, knn, decision_tree, gradient_boosting")
+                return
             
-            # Preprocess data
-            df_processed, scaler, features = preprocess_data(df_physio, df_eeg, df_gaze)
-            
-            # Save scaler
-            joblib.dump(scaler, SCALER_OUTPUT_PATH)
-            logger.info(f"Scaler saved to {SCALER_OUTPUT_PATH}")
-            
-            # Train model with specified type
-            model, accuracy, X_test, y_test, y_pred = train_model(df_processed, features, model_type, scaler)
-            
-            logger.info(f"Model training complete. Accuracy: {accuracy:.3f}")
-            logger.info(f"Model saved at {MODEL_OUTPUT_PATH}")
-            logger.info(f"Scaler saved at {SCALER_OUTPUT_PATH}")
-            
-            # Print summary to console
-            print("\n" + "="*50)
-            print(f"✓ MODEL TRAINING COMPLETE")
-            print("="*50)
-            print(f"Model Type: {AVAILABLE_MODELS.get(model_type, 'Unknown')}")
-            print(f"Accuracy:   {accuracy:.3f}")
-            
-            print("\nTo make predictions, run:")
-            print(f"  python cwt.py predict --input YOUR_DATA.json")
-            print("="*50)
-            
-        except Exception as e:
-            logger.error(f"Training pipeline failed: {str(e)}")
-            print(f"\nERROR: Training pipeline failed: {str(e)}")
-            sys.exit(1)
-    
-    elif args.command == 'predict':
-        try:
-            # Verify that input file exists
-            if not os.path.exists(args.input):
-                logger.error(f"Input file not found: {args.input}")
-                print(f"\n✘ ERROR: Input file not found: {args.input}")
-                sys.exit(1)
-            
-            # If auto-detect flag is set or the input file is a CSV and batch flag is set
-            if args.auto_detect or (args.batch or args.input.lower().endswith('.csv')):
-                logger.info(f"Processing batch data or auto-detecting input type")
-                
-                if args.auto_detect:
-                    # Use the automatic detection function
-                    results = predict_automatic(args.input, args.output, args.model, args.scaler)
-                else:
-                    # Process as batch CSV file
-                    results = predict_from_csv(args.input, args.output, args.model, args.scaler)
+            # Create output directory if specified
+            if args.output_dir:
+                os.makedirs(args.output_dir, exist_ok=True)
+                model_dir = args.output_dir
             else:
-                # Standard single-sample prediction
-                # Load input data from JSON
-                with open(args.input, 'r') as f:
+                model_dir = os.path.join(MODEL_DIR, args.model_type)
+                os.makedirs(model_dir, exist_ok=True)
+            
+            logger.info(f"Training {args.model_type} model in directory: {model_dir}")
+            
+            # Train model
+            model, scaler, accuracy, f1, metadata = train_model(args.model_type, model_dir)
+            
+            logger.info(f"Model training complete!")
+            logger.info(f"Accuracy: {accuracy:.4f}")
+            logger.info(f"F1 Score: {f1:.4f}")
+        
+        # Train All command
+        elif args.command == "train-all":
+            # Create output directory if specified
+            output_dir = args.output_dir if args.output_dir else MODEL_DIR
+            
+            # Parse skip types
+            skip_types = args.skip_types.split(',') if args.skip_types else None
+            
+            # Train all models
+            results = train_all_models(
+                output_dir=output_dir,
+                parallel=args.parallel,
+                skip_types=skip_types
+            )
+            
+            # Print results
+            logger.info("All model training complete!")
+            logger.info("Results:")
+            for model_type, result in results.items():
+                if "error" in result:
+                    logger.info(f"  {model_type}: ERROR - {result['error']}")
+                else:
+                    logger.info(f"  {model_type}: Accuracy = {result['accuracy']:.4f}, F1 Score = {result['f1_score']:.4f}")
+        
+        # Predict command
+        elif args.command == "predict":
+            # Load the input data
+            input_data = {}
+            
+            if args.input_json:
+                # Load from JSON file
+                with open(args.input_json, 'r') as f:
                     input_data = json.load(f)
+            elif args.input_values:
+                # Parse input values directly
+                for kv in args.input_values:
+                    key, value = kv.split('=')
+                    input_data[key] = float(value)
+            else:
+                # Use interactive input
+                logger.info("Please enter the feature values:")
+                for feature in REQUIRED_FEATURES:
+                    while True:
+                        try:
+                            value = input(f"{feature}: ")
+                            input_data[feature] = float(value)
+                            break
+                        except ValueError:
+                            logger.error("Please enter a valid number")
+            
+            # Make prediction
+            result = predict(
+                data=input_data,
+                model_type=args.model_type,
+                threshold=args.threshold,
+                infer_missing=args.infer_missing
+            )
+            
+            # Show results
+            logger.info("Prediction Results:")
+            logger.info(f"Workload Class: {result['workload_class']}")
+            logger.info(f"Workload Label: {result['workload_label']}")
+            logger.info(f"Confidence: {result['confidence']:.4f}")
+            logger.info(f"Model Type: {result['model_type']}")
+            
+            # Output results to file if specified
+            if args.output_json:
+                with open(args.output_json, 'w') as f:
+                    json.dump(result, f, indent=4)
+                logger.info(f"Results saved to {args.output_json}")
+        
+        # Batch predict command
+        elif args.command == "batch-predict":
+            # Validate input parameters
+            if not args.input_file:
+                logger.error("No input file specified!")
+                return
+            
+            if not os.path.exists(args.input_file):
+                logger.error(f"Input file not found: {args.input_file}")
+                return
+            
+            # Make batch prediction
+            result_df = predict_batch(
+                file_path=args.input_file,
+                output_file=args.output_file,
+                model_type=args.model_type,
+                threshold=args.threshold,
+                infer_missing=args.infer_missing
+            )
+            
+            # Show summary
+            logger.info("Batch Prediction Results:")
+            logger.info(f"Total Records: {len(result_df)}")
+            
+            # Count by class
+            class_counts = result_df["workload_class"].value_counts()
+            for cls, count in class_counts.items():
+                if cls is None:
+                    logger.info(f"Below Threshold: {count}")
+                else:
+                    label = WORKLOAD_CLASSES.get(int(cls), "Unknown")
+                    logger.info(f"{label} (Class {cls}): {count}")
+            
+            # Show average confidence
+            logger.info(f"Average Confidence: {result_df['confidence'].mean():.4f}")
+        
+        # Time series predict command
+        elif args.command == "time-series-predict":
+            # Validate input parameters
+            if not args.input_file:
+                logger.error("No input file specified!")
+                return
+            
+            if not os.path.exists(args.input_file):
+                logger.error(f"Input file not found: {args.input_file}")
+                return
+            
+            # Make time series prediction
+            result_df = predict_time_series(
+                file_path=args.input_file,
+                output_file=args.output_file,
+                window_size=args.window_size,
+                step_size=args.step_size,
+                model_type=args.model_type,
+                threshold=args.threshold,
+                infer_missing=args.infer_missing
+            )
+            
+            # Show summary
+            logger.info("Time Series Prediction Results:")
+            logger.info(f"Total Time Points: {len(result_df)}")
+            
+            # Count by class
+            class_counts = result_df["workload_class"].value_counts()
+            for cls, count in class_counts.items():
+                if cls is None:
+                    logger.info(f"Below Threshold: {count}")
+                else:
+                    label = WORKLOAD_CLASSES.get(int(cls), "Unknown")
+                    logger.info(f"{label} (Class {cls}): {count}")
+            
+            # Show average confidence
+            logger.info(f"Average Confidence: {result_df['confidence'].mean():.4f}")
+            
+            # Plot the time series if requested
+            if args.visualize and args.output_file:
+                # Import visualization modules only when needed
+                import matplotlib.pyplot as plt
+                import seaborn as sns
                 
-                # Make prediction using the specified model or automatically select one
-                prediction, probabilities = predict_new_data(args.model, args.scaler, input_data)
+                # Plot the time series
+                plt.figure(figsize=(12, 6))
+                plt.plot(result_df["timestamp"], result_df["workload_class"], marker='o')
+                plt.title("Cognitive Workload Time Series")
+                plt.xlabel("Time")
+                plt.ylabel("Workload Class")
+                plt.grid(True)
                 
-                if not prediction:
-                    print("\n✘ ERROR: Prediction failed")
-                    sys.exit(1)
+                # Set y-ticks to workload classes
+                classes = sorted(WORKLOAD_CLASSES.keys())
+                plt.yticks(classes, [WORKLOAD_CLASSES[c] for c in classes])
                 
-                # Output prediction
-                result = {
-                    "prediction": prediction,
-                    "confidence": probabilities,
-                    "timestamp": datetime.now().isoformat()
+                # Save plot
+                plot_path = args.output_file.replace(".csv", ".png")
+                plt.savefig(plot_path)
+                logger.info(f"Time series plot saved to {plot_path}")
+                
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        if args.verbose:
+            logger.exception("Detailed error information:")
+        return 1
+    
+    return 0
+
+def setup_logging():
+    """
+    Set up logging configuration for the application.
+    """
+    # Create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
+    
+    # Create a logger specific to this module
+    global logger
+    logger = logging.getLogger('cwt')
+
+def parse_args():
+    """
+    Parse command line arguments.
+    
+    Returns:
+        Namespace: Parsed arguments
+    """
+    parser = argparse.ArgumentParser(description="Cognitive Workload Training (CWT) Tool")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    
+    # Define subparsers for commands
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    
+    # Setup command
+    setup_parser = subparsers.add_parser("setup", help="Setup the CWT environment")
+    
+    # Train command
+    train_parser = subparsers.add_parser("train", help="Train a cognitive workload model")
+    train_parser.add_argument("--model-type", type=str, help="Type of model to train (svm, random_forest, etc.)")
+    train_parser.add_argument("--output-dir", type=str, help="Directory to save the trained model")
+    
+    # Train All command
+    train_all_parser = subparsers.add_parser("train-all", help="Train all available cognitive workload models")
+    train_all_parser.add_argument("--output-dir", type=str, help="Directory to save the trained models")
+    train_all_parser.add_argument("--parallel", action="store_true", help="Train models in parallel")
+    train_all_parser.add_argument("--skip-types", type=str, help="Comma-separated list of model types to skip")
+    
+    # Predict command
+    predict_parser = subparsers.add_parser("predict", help="Predict cognitive workload from input data")
+    predict_parser.add_argument("--input-json", type=str, help="JSON file with input data")
+    predict_parser.add_argument("--input-values", type=str, nargs="+", help="Input values in key=value format")
+    predict_parser.add_argument("--output-json", type=str, help="JSON file to save prediction results")
+    predict_parser.add_argument("--model-type", type=str, help="Type of model to use for prediction")
+    predict_parser.add_argument("--threshold", type=float, help="Confidence threshold for prediction")
+    predict_parser.add_argument("--infer-missing", action="store_true", help="Infer missing features from available data")
+    
+    # Batch predict command
+    batch_predict_parser = subparsers.add_parser("batch-predict", help="Batch predict cognitive workload from a CSV file")
+    batch_predict_parser.add_argument("--input-file", type=str, help="Input CSV file with feature values")
+    batch_predict_parser.add_argument("--output-file", type=str, help="Output CSV file to save prediction results")
+    batch_predict_parser.add_argument("--model-type", type=str, help="Type of model to use for prediction")
+    batch_predict_parser.add_argument("--threshold", type=float, help="Confidence threshold for prediction")
+    batch_predict_parser.add_argument("--infer-missing", action="store_true", help="Infer missing features from available data")
+    
+    # Time series predict command
+    time_series_parser = subparsers.add_parser("time-series-predict", help="Predict cognitive workload from time series data")
+    time_series_parser.add_argument("--input-file", type=str, help="Input CSV file with time series data")
+    time_series_parser.add_argument("--output-file", type=str, help="Output CSV file to save prediction results")
+    time_series_parser.add_argument("--window-size", type=int, default=10, help="Size of sliding window in samples")
+    time_series_parser.add_argument("--step-size", type=int, default=5, help="Step size for sliding window")
+    time_series_parser.add_argument("--model-type", type=str, help="Type of model to use for prediction")
+    time_series_parser.add_argument("--threshold", type=float, help="Confidence threshold for prediction")
+    time_series_parser.add_argument("--visualize", action="store_true", help="Visualize time series prediction results")
+    time_series_parser.add_argument("--infer-missing", action="store_true", help="Infer missing features from available data")
+    
+    return parser.parse_args()
+
+def find_best_model():
+    """
+    Find the best model based on accuracy or other metrics.
+    
+    Returns:
+        tuple: (model_path, metadata) for the best model
+    """
+    # Get all models
+    models_dir = MODEL_DIR
+    if not os.path.exists(models_dir):
+        logger.error(f"Models directory not found: {models_dir}")
+        return None, None
+    
+    best_model_path = None
+    best_metadata = None
+    best_accuracy = -1
+    
+    # Look through all model directories
+    for model_type in os.listdir(models_dir):
+        model_type_dir = os.path.join(models_dir, model_type)
+        if not os.path.isdir(model_type_dir):
+            continue
+            
+        # Check for model file
+        model_files = [f for f in os.listdir(model_type_dir) 
+                      if f.endswith('.pkl') and not f.startswith('scaler')]
+        
+        for model_file in model_files:
+            model_path = os.path.join(model_type_dir, model_file)
+            
+            # Check for metadata
+            metadata_path = os.path.join(model_type_dir, "metadata.json")
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    # Check if it has accuracy information
+                    if 'accuracy' in metadata:
+                        accuracy = float(metadata['accuracy'])
+                        if accuracy > best_accuracy:
+                            best_accuracy = accuracy
+                            best_model_path = model_path
+                            best_metadata = metadata
+                except Exception as e:
+                    logger.warning(f"Error reading metadata for {model_path}: {e}")
+    
+    if best_model_path:
+        logger.info(f"Found best model: {best_model_path} with accuracy: {best_accuracy:.4f}")
+        return best_model_path, best_metadata
+    else:
+        # If no model with accuracy found, fall back to latest model
+        logger.warning("No model with accuracy metadata found, falling back to latest model")
+        return find_latest_model()
+
+def train_all_models(output_dir=None, parallel=False, skip_types=None):
+    """
+    Train all available cognitive workload classification models.
+    
+    Args:
+        output_dir (str, optional): Directory to save models to. If None, uses default directory.
+        parallel (bool, optional): Whether to train models in parallel. Defaults to False.
+        skip_types (list, optional): List of model types to skip. Defaults to None.
+        
+    Returns:
+        dict: Dictionary of model results with metrics
+    """
+    if output_dir is None:
+        output_dir = MODEL_DIR
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    logger.info(f"Training all model types in directory: {output_dir}")
+    
+    # Check if required data files exist
+    for data_type, file_path in DATA_FILES.items():
+        if not os.path.exists(file_path):
+            logger.error(f"Required data file not found: {file_path}")
+            raise FileNotFoundError(f"Required data file not found: {file_path}")
+    
+    # Load data
+    df_physio, df_eeg, df_gaze = load_data()
+    
+    # Preprocess data
+    X, y, features = preprocess_data(df_physio, df_eeg, df_gaze)
+    
+    # Create a shared scaler to ensure consistency across models
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Save the shared scaler
+    scaler_path = os.path.join(output_dir, "shared_scaler.pkl")
+    with open(scaler_path, "wb") as f:
+        pickle.dump(scaler, f)
+    
+    logger.info(f"Saved shared scaler to {scaler_path}")
+    
+    # Find all available model types
+    model_types = ["svm", "random_forest", "knn", "mlp", "gradient_boosting", "decision_tree"]
+    
+    # Filter out skipped model types
+    if skip_types:
+        model_types = [model_type for model_type in model_types if model_type not in skip_types]
+    
+    logger.info(f"Training the following model types: {model_types}")
+    
+    # Metadata for the ensemble of models
+    metadata = {
+        "creation_date": datetime.datetime.now().isoformat(),
+        "training_data_files": DATA_FILES,
+        "features": features,
+        "model_types": model_types,
+        "shared_scaler": scaler_path
+    }
+    
+    # Results dictionary
+    results = {}
+    
+    if parallel and len(model_types) > 1:
+        # Train models in parallel
+        logger.info("Training models in parallel")
+        
+        # Create pool of workers
+        num_cores = min(multiprocessing.cpu_count(), len(model_types))
+        logger.info(f"Using {num_cores} CPU cores for parallel training")
+        
+        with ThreadPool(num_cores) as pool:
+            # Prepare arguments for each model
+            args = [(model_type, X_scaled, y, features, output_dir) for model_type in model_types]
+            
+            # Train models in parallel
+            parallel_results = pool.map(_train_model_wrapper, args)
+            
+            # Process results
+            for model_type, model_path, accuracy, f1 in parallel_results:
+                results[model_type] = {
+                    "model_path": model_path,
+                    "accuracy": accuracy,
+                    "f1_score": f1
+                }
+    else:
+        # Train models sequentially
+        logger.info("Training models sequentially")
+        
+        for model_type in model_types:
+            try:
+                logger.info(f"Training {model_type} model...")
+                
+                # Create model directory
+                model_dir = os.path.join(output_dir, model_type)
+                os.makedirs(model_dir, exist_ok=True)
+                
+                # Train model
+                model, _, accuracy, f1, _ = train_model(model_type, model_dir)
+                
+                # Save results
+                results[model_type] = {
+                    "model_path": os.path.join(model_dir, f"{model_type}.pkl"),
+                    "accuracy": float(accuracy),
+                    "f1_score": float(f1)
                 }
                 
-                # Save to output file if specified
-                if args.output:
-                    with open(args.output, 'w') as f:
-                        json.dump(result, f, indent=2)
-                    print(f"\n✓ Prediction saved to {args.output}")
+                logger.info(f"Successfully trained {model_type} model")
+                logger.info(f"Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}")
                 
-                # Print to console
-                print("\n" + "="*50)
-                print(f"✓ PREDICTION RESULTS")
-                print("="*50)
-                print(f"Predicted Cognitive State: {prediction}")
-                print("\nProbabilities:")
-                for cls, prob in probabilities.items():
-                    print(f"  {cls:<10}: {prob:.2f}")
-                print("="*50)
-            
-        except Exception as e:
-            logger.error(f"Prediction failed: {str(e)}")
-            print(f"\nERROR: Prediction failed: {str(e)}")
-            sys.exit(1)
+            except Exception as e:
+                logger.error(f"Error training {model_type} model: {e}")
+                # Continue with other models even if one fails
+                results[model_type] = {
+                    "error": str(e)
+                }
     
-    elif args.command == 'batch-predict':
-        try:
-            # Verify that input file exists
-            if not os.path.exists(args.input):
-                logger.error(f"Input file not found: {args.input}")
-                print(f"\n✘ ERROR: Input file not found: {args.input}")
-                sys.exit(1)
-            
-            # Process as batch CSV file
-            predict_from_csv(args.input, args.output, args.model, args.scaler)
-            
-        except Exception as e:
-            logger.error(f"Batch prediction failed: {str(e)}")
-            print(f"\nERROR: Batch prediction failed: {str(e)}")
-            sys.exit(1)
+    # Save metadata
+    metadata["results"] = results
+    metadata_path = os.path.join(output_dir, "ensemble_metadata.json")
     
-    elif args.command == 'list-models':
-        list_available_models()
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=4)
     
-    elif args.command == 'install-models':
-        install_sample_models()
+    logger.info(f"Saved ensemble metadata to {metadata_path}")
     
-    elif args.command in ['help', '!help']:
-        display_help(args.topic)
+    # Return results
+    return results
+
+def _train_model_wrapper(args):
+    """
+    Helper function for parallel model training.
     
-    elif args.command == 'train-from-examples':
-        # Execute the train_from_examples.py script with the given model type
-        examples_script = Path(__file__).resolve().parent / "examples" / "train_from_examples.py"
-        if not examples_script.exists():
-            print("\n✘ ERROR: examples/train_from_examples.py script not found")
-            print("Please ensure the examples directory is set up correctly.")
-            sys.exit(1)
+    Args:
+        args: Tuple of (model_type, X_scaled, y, features, output_dir)
         
-        cmd = [sys.executable, str(examples_script)]
-        if args.model_type:
-            cmd.extend(["--model-type", args.model_type])
-        
-        subprocess.run(cmd)
+    Returns:
+        tuple: (model_type, model_path, accuracy, f1_score)
+    """
+    model_type, X_scaled, y, features, output_dir = args
     
-    else:
-        logger.error(f"Unknown command: {args.command}")
-        logger.error("Use 'help' to see all available commands.")
-        sys.exit(1)
+    try:
+        logger.info(f"Training {model_type} model in parallel process...")
+        
+        # Create model directory
+        model_dir = os.path.join(output_dir, model_type)
+        os.makedirs(model_dir, exist_ok=True)
+        
+        # Get model object
+        model = create_model(model_type)
+        
+        # Train model
+        model.fit(X_scaled, y)
+        
+        # Evaluate model
+        y_pred = model.predict(X_scaled)
+        accuracy = accuracy_score(y, y_pred)
+        f1 = f1_score(y, y_pred, average='weighted')
+        
+        # Save model
+        model_path = os.path.join(model_dir, f"{model_type}.pkl")
+        with open(model_path, "wb") as f:
+            pickle.dump(model, f)
+        
+        # Save additional metadata
+        metadata = {
+            "creation_date": datetime.datetime.now().isoformat(),
+            "model_type": model_type,
+            "features": features,
+            "accuracy": float(accuracy),
+            "f1_score": float(f1)
+        }
+        
+        metadata_path = os.path.join(model_dir, "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=4)
+        
+        logger.info(f"Successfully trained {model_type} model in parallel process")
+        
+        return model_type, model_path, accuracy, f1
+        
+    except Exception as e:
+        logger.error(f"Error training {model_type} model in parallel process: {e}")
+        return model_type, None, 0.0, 0.0
 
 if __name__ == "__main__":
     # Special case for !help command
