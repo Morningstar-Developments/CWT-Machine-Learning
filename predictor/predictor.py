@@ -3,13 +3,16 @@
 Cognitive Workload Assessment and Prediction Tool
 
 This module implements a machine learning pipeline for predicting cognitive workload
-based on physiological, EEG, and gaze data. The tool preprocesses multi-modal data,
-trains a Random Forest classifier, and provides prediction functionality.
+based on physiological, EEG, and gaze data. It provides:
+  - Data loading and basic preprocessing
+  - Optional hyperparameter tuning for model training (RandomizedSearchCV)
+  - Model saving (Random Forest + scaler)
+  - Easy prediction with the latest or user-specified model
 
 Usage:
-    python cwt.py train
-    python cwt.py predict --input [input_data.json]
-    python cwt.py list-models
+    python predictor.py train
+    python predictor.py predict --input [input_data.json]
+    python predictor.py list-models
 """
 
 import os
@@ -19,15 +22,20 @@ import logging
 from datetime import datetime
 import argparse
 from pathlib import Path
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Union
 
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import (
+    train_test_split, cross_val_score, RandomizedSearchCV
+)
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score, classification_report, confusion_matrix,
+    f1_score, precision_score, recall_score
+)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
@@ -53,6 +61,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger('cwt')
 
+# Warn if certain environment variables are missing
+if 'PHYSIO_DATA_PATH' not in os.environ:
+    logger.warning("PHYSIO_DATA_PATH not set in the environment. Using default path.")
+
 # Data paths configuration
 DATA_FILES = {
     "physiological": os.getenv('PHYSIO_DATA_PATH', 'data/Enhanced_Workload_Clinical_Data.csv'),
@@ -73,24 +85,32 @@ os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 TEST_SIZE = float(os.getenv('TEST_SIZE', 0.2))
 RANDOM_SEED = int(os.getenv('RANDOM_SEED', 42))
 
-# Random Forest hyperparameters (allowing configuration via env variables)
+# Random Forest hyperparameters
 RF_N_ESTIMATORS = int(os.getenv('RF_N_ESTIMATORS', 100))
 RF_MAX_DEPTH = os.getenv('RF_MAX_DEPTH', None)
 RF_MAX_DEPTH = int(RF_MAX_DEPTH) if RF_MAX_DEPTH and RF_MAX_DEPTH.isdigit() else None
 RF_N_JOBS = int(os.getenv('RF_N_JOBS', -1))
 
+# Whether to use hyperparameter tuning via RandomizedSearchCV (set TUNE_MODEL=true in .env)
+TUNE_MODEL = (os.getenv('TUNE_MODEL', 'false').lower() == 'true')
+
 
 # ---------------------- HELPER FUNCTIONS ---------------------- #
 def validate_file_exists(file_path: str) -> bool:
-    """Validate that a file exists on disk."""
+    """
+    Validate that a file exists on disk, raising an error otherwise.
+    """
     if not os.path.exists(file_path):
-        logger.error(f"File not found: {file_path}")
-        raise FileNotFoundError(f"File not found: {file_path}")
+        error_msg = f"File not found: {file_path}. Please verify your data path or environment settings."
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
     return True
 
 
 def safe_read_csv(file_path: str) -> pd.DataFrame:
-    """Safely read a CSV file with error handling."""
+    """
+    Safely read a CSV file with error handling.
+    """
     try:
         validate_file_exists(file_path)
         df = pd.read_csv(file_path)
@@ -100,8 +120,13 @@ def safe_read_csv(file_path: str) -> pd.DataFrame:
         raise
 
 
-def save_model_metadata(model: Any, features: List[str], accuracy: float, class_report: Dict[str, Any]) -> None:
-    """Save metadata about the model for reproducibility."""
+def save_model_metadata(
+    model: Any, features: List[str], accuracy: float, class_report: Dict[str, Any]
+) -> None:
+    """
+    Save metadata about the model for reproducibility.
+    Includes accuracy, classification report, feature set, and hyperparameters.
+    """
     metadata = {
         "model_version": MODEL_VERSION,
         "training_date": datetime.now().isoformat(),
@@ -113,7 +138,8 @@ def save_model_metadata(model: Any, features: List[str], accuracy: float, class_
             "random_seed": RANDOM_SEED,
             "RF_N_ESTIMATORS": RF_N_ESTIMATORS,
             "RF_MAX_DEPTH": RF_MAX_DEPTH,
-            "RF_N_JOBS": RF_N_JOBS
+            "RF_N_JOBS": RF_N_JOBS,
+            "tune_model": TUNE_MODEL
         }
     }
     try:
@@ -126,7 +152,13 @@ def save_model_metadata(model: Any, features: List[str], accuracy: float, class_
 
 
 def plot_feature_importance(model: Any, feature_names: List[str], output_path: str = None) -> None:
-    """Plot feature importance from the trained model."""
+    """
+    Plot feature importance from the trained model.
+    """
+    if not hasattr(model, "feature_importances_"):
+        logger.warning("Model does not have feature_importances_, skipping plot.")
+        return
+
     importances = model.feature_importances_
     indices = np.argsort(importances)[::-1]
     
@@ -145,7 +177,9 @@ def plot_feature_importance(model: Any, feature_names: List[str], output_path: s
 
 
 def plot_confusion_matrix(y_true: Any, y_pred: Any, output_path: str = None) -> None:
-    """Plot confusion matrix from predictions."""
+    """
+    Plot confusion matrix from predictions.
+    """
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
@@ -169,7 +203,7 @@ def load_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     Load the physiological, EEG, and gaze data from CSV files.
     
     Returns:
-        Tuple containing dataframes (df_physio, df_eeg, df_gaze)
+        (df_physio, df_eeg, df_gaze)
     """
     logger.info("Loading data files...")
     try:
@@ -187,17 +221,13 @@ def load_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         raise
 
 
-def preprocess_data(df_physio: pd.DataFrame, df_eeg: pd.DataFrame, df_gaze: pd.DataFrame) -> Tuple[pd.DataFrame, StandardScaler, List[str]]:
+def preprocess_data(
+    df_physio: pd.DataFrame, df_eeg: pd.DataFrame, df_gaze: pd.DataFrame
+) -> Tuple[pd.DataFrame, StandardScaler, List[str]]:
     """
     Preprocess and merge the physiological, EEG, and gaze data.
-    
-    Args:
-        df_physio: Physiological data DataFrame.
-        df_eeg: EEG data DataFrame.
-        df_gaze: Gaze tracking data DataFrame.
-        
     Returns:
-        Tuple containing processed DataFrame, fitted StandardScaler, and list of feature names.
+        (processed_df, fitted_scaler, feature_names)
     """
     logger.info("Preprocessing data...")
     try:
@@ -209,51 +239,57 @@ def preprocess_data(df_physio: pd.DataFrame, df_eeg: pd.DataFrame, df_gaze: pd.D
             df["timestamp"] = pd.to_datetime(df["timestamp"])
         
         # Merge datasets based on nearest timestamp
-        logger.debug("Merging datasets based on timestamp")
-        try:
-            df_merged = pd.merge_asof(df_physio.sort_values("timestamp"), 
-                                      df_eeg.sort_values("timestamp"), 
-                                      on="timestamp")
-            df_merged = pd.merge_asof(df_merged.sort_values("timestamp"), 
-                                      df_gaze.sort_values("timestamp"), 
-                                      on="timestamp")
-        except Exception as e:
-            logger.exception(f"Error merging datasets: {str(e)}")
-            raise
+        df_merged = pd.merge_asof(df_physio.sort_values("timestamp"), 
+                                  df_eeg.sort_values("timestamp"), 
+                                  on="timestamp")
+        df_merged = pd.merge_asof(df_merged.sort_values("timestamp"), 
+                                  df_gaze.sort_values("timestamp"), 
+                                  on="timestamp")
         
         # Drop rows with missing values after merge
         missing_values = df_merged.isnull().sum()
         if missing_values.any():
-            logger.warning(f"Missing values detected after merge: \n{missing_values[missing_values > 0]}")
+            logger.warning(
+                "Missing values detected after merge:\n"
+                f"{missing_values[missing_values > 0]}"
+            )
             logger.info("Dropping rows with missing values")
             df_merged = df_merged.dropna()
         
-        # Define the expected features (including the target column for splitting later)
-        expected_features = ["pulse_rate", "blood_pressure_sys", "resp_rate", "pupil_diameter_left",
-                             "pupil_diameter_right", "fixation_duration", "blink_rate", "workload_intensity",
-                             "gaze_x", "gaze_y", "alpha_power", "theta_power"]
+        # Define the expected features
+        expected_features = [
+            "pulse_rate", "blood_pressure_sys", "resp_rate",
+            "pupil_diameter_left", "pupil_diameter_right",
+            "fixation_duration", "blink_rate", 
+            "workload_intensity", "gaze_x", "gaze_y",
+            "alpha_power", "theta_power"
+        ]
         
         # Validate features exist
-        missing_features = [f for f in expected_features if f not in df_merged.columns]
-        if missing_features:
-            logger.error(f"Missing features in dataset: {missing_features}")
-            raise ValueError(f"Missing features in dataset: {missing_features}")
+        missing_feats = [f for f in expected_features if f not in df_merged.columns]
+        if missing_feats:
+            logger.error(f"Missing features in dataset: {missing_feats}")
+            raise ValueError(f"Missing features in dataset: {missing_feats}")
         
-        logger.debug(f"Selecting {len(expected_features)} features for analysis")
-        df_selected = df_merged[expected_features]
+        # Filter out just those columns
+        df_selected = df_merged[expected_features].copy()
         
         # Standardize features
-        logger.debug("Standardizing features")
         scaler = StandardScaler()
-        df_selected[expected_features] = scaler.fit_transform(df_selected[expected_features])
+        features_no_target = [f for f in expected_features if f != "workload_intensity"]
+        df_selected[features_no_target] = scaler.fit_transform(df_selected[features_no_target])
         
-        # Label Encoding for Workload Intensity (target variable)
-        logger.debug("Encoding cognitive state labels")
-        df_selected["cognitive_state"] = pd.qcut(df_selected["workload_intensity"], q=3, labels=["Low", "Medium", "High"])
+        # Label Encoding for Workload Intensity (target variable),
+        # converting it to "Low", "Medium", "High" bins
+        df_selected["cognitive_state"] = pd.qcut(
+            df_selected["workload_intensity"], q=3, labels=["Low", "Medium", "High"]
+        )
         
         logger.info(f"Preprocessing complete. Final dataset shape: {df_selected.shape}")
-        # Return the processed DataFrame, scaler, and the list of feature names used for training
-        return df_selected, scaler, [col for col in df_selected.columns if col not in ["workload_intensity", "cognitive_state"]]
+        
+        # Return (df, scaler, list_of_feature_cols_for_training)
+        training_cols = [col for col in df_selected.columns if col not in ["workload_intensity", "cognitive_state"]]
+        return df_selected, scaler, training_cols
     
     except Exception as e:
         logger.exception(f"Error during preprocessing: {str(e)}")
@@ -261,66 +297,85 @@ def preprocess_data(df_physio: pd.DataFrame, df_eeg: pd.DataFrame, df_gaze: pd.D
 
 
 # ---------------------- MODEL TRAINING ---------------------- #
-def train_model(df: pd.DataFrame, feature_cols: List[str]) -> Tuple[Any, float, pd.DataFrame, pd.Series, np.ndarray]:
+def train_model(
+    df: pd.DataFrame, feature_cols: List[str]
+) -> Tuple[Union[RandomForestClassifier, Any], float, pd.DataFrame, pd.Series, np.ndarray]:
     """
     Train a Random Forest classifier for cognitive state prediction.
-    
-    Args:
-        df: Preprocessed DataFrame with features and target.
-        feature_cols: List of feature column names.
-        
+    If TUNE_MODEL is True in the environment, performs a RandomizedSearchCV
+    to find better hyperparameters for improved prediction quality.
+
     Returns:
-        Tuple containing the trained model, accuracy, test features, test labels, and predictions.
+        (trained_model, accuracy, X_test, y_test, predicted_labels)
     """
-    logger.info("Training model...")
+    logger.info("Starting model training...")
     try:
-        # Prepare training data: drop target-related columns
-        X = df.drop(columns=["cognitive_state", "workload_intensity"])
+        # Prepare training data
+        X = df[feature_cols]
         y = df["cognitive_state"]
         
-        logger.debug(f"Splitting data with test_size={TEST_SIZE}, random_state={RANDOM_SEED}")
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_SEED)
-        
-        # Initialize RandomForestClassifier with environment-configured hyperparameters
-        logger.debug("Initializing Random Forest Classifier")
-        model = RandomForestClassifier(
-            n_estimators=RF_N_ESTIMATORS,
-            max_depth=RF_MAX_DEPTH,
-            random_state=RANDOM_SEED,
-            n_jobs=RF_N_JOBS
+            X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_SEED
         )
         
-        # Cross-validation on training set
-        logger.debug("Performing 5-fold cross-validation")
-        cv_scores = cross_val_score(model, X_train, y_train, cv=5, n_jobs=RF_N_JOBS)
-        logger.info(f"Cross-validation scores: {cv_scores}")
-        logger.info(f"Mean CV accuracy: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}")
-        
-        # Fit model on full training data
-        model.fit(X_train, y_train)
-        
+        if not TUNE_MODEL:
+            # Quick train
+            model = RandomForestClassifier(
+                n_estimators=RF_N_ESTIMATORS,
+                max_depth=RF_MAX_DEPTH,
+                random_state=RANDOM_SEED,
+                n_jobs=RF_N_JOBS
+            )
+            logger.info("Fitting Random Forest without hyperparameter tuning...")
+            model.fit(X_train, y_train)
+        else:
+            # Randomized search for hyperparameter tuning
+            logger.info("Performing RandomizedSearchCV for hyperparameter tuning...")
+            param_dist = {
+                "n_estimators": [50, 100, 200],
+                "max_depth": [None, 10, 20, 30],
+                "min_samples_leaf": [1, 2, 4, 8],
+                "bootstrap": [True, False]
+            }
+            rf = RandomForestClassifier(random_state=RANDOM_SEED, n_jobs=RF_N_JOBS)
+            random_search = RandomizedSearchCV(
+                rf, param_distributions=param_dist, n_iter=10,
+                cv=3, verbose=1, random_state=RANDOM_SEED, n_jobs=RF_N_JOBS
+            )
+            random_search.fit(X_train, y_train)
+            model = random_search.best_estimator_
+            logger.info(f"Best hyperparameters found: {random_search.best_params_}")
+
         # Evaluate on test set
         y_pred = model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-        class_report = classification_report(y_test, y_pred, output_dict=True)
+
+        # Log multiple metrics
+        f1 = f1_score(y_test, y_pred, average='weighted')
+        precision = precision_score(y_test, y_pred, average='weighted')
+        recall = recall_score(y_test, y_pred, average='weighted')
         
-        logger.info(f"Model Accuracy: {accuracy:.3f}")
+        logger.info(f"Test Accuracy:    {accuracy:.3f}")
+        logger.info(f"Test F1-score:    {f1:.3f}")
+        logger.info(f"Test Precision:   {precision:.3f}")
+        logger.info(f"Test Recall:      {recall:.3f}")
+        
+        class_report_dict = classification_report(y_test, y_pred, output_dict=True)
         logger.info(f"Classification Report:\n{classification_report(y_test, y_pred)}")
-        
-        # Generate and save evaluation plots
+
+        # Plot confusion matrix and feature importance
         cm_path = os.path.join(MODEL_OUTPUT_DIR, f"confusion_matrix_{MODEL_VERSION}.png")
         plot_confusion_matrix(y_test, y_pred, cm_path)
         
         fi_path = os.path.join(MODEL_OUTPUT_DIR, f"feature_importance_{MODEL_VERSION}.png")
-        plot_feature_importance(model, list(X.columns), fi_path)
+        plot_feature_importance(model, feature_cols, fi_path)
         
-        # Save model and scaler
+        # Save model
         joblib.dump(model, MODEL_OUTPUT_PATH)
         logger.info(f"Model saved to {MODEL_OUTPUT_PATH}")
         
         # Save metadata
-        save_model_metadata(model, list(X.columns), accuracy, class_report)
+        save_model_metadata(model, feature_cols, accuracy, class_report_dict)
         
         return model, accuracy, X_test, y_test, y_pred
     
@@ -331,7 +386,9 @@ def train_model(df: pd.DataFrame, feature_cols: List[str]) -> Tuple[Any, float, 
 
 # ---------------------- PREDICTION FUNCTION ---------------------- #
 def validate_input_features(input_data: Dict[str, Any], required_features: List[str]) -> None:
-    """Ensure that input data contains all required features."""
+    """
+    Ensure that input data contains all required features.
+    """
     missing = [feat for feat in required_features if feat not in input_data]
     if missing:
         error_msg = f"Missing input features: {missing}"
@@ -339,17 +396,14 @@ def validate_input_features(input_data: Dict[str, Any], required_features: List[
         raise ValueError(error_msg)
 
 
-def predict_new_data(model_path: str, scaler_path: str, new_data: Dict[str, Any]) -> Tuple[str, Dict[str, float]]:
+def predict_new_data(
+    model_path: str, scaler_path: str, new_data: Dict[str, Any]
+) -> Tuple[str, Dict[str, float]]:
     """
     Make predictions on new data using the trained model.
-    
-    Args:
-        model_path: Path to the saved model.
-        scaler_path: Path to the saved scaler.
-        new_data: Dictionary containing feature values.
-        
+
     Returns:
-        Tuple with predicted cognitive state and dictionary of class probabilities.
+        (predicted_cognitive_state, class_probabilities_dict)
     """
     try:
         logger.info(f"Loading model from {model_path}")
@@ -358,19 +412,22 @@ def predict_new_data(model_path: str, scaler_path: str, new_data: Dict[str, Any]
         logger.info(f"Loading scaler from {scaler_path}")
         scaler = joblib.load(scaler_path)
         
-        # Determine required features (assumes model was trained on these)
-        required_features = list(model.feature_names_in_) if hasattr(model, "feature_names_in_") else list(new_data.keys())
+        required_features = (
+            list(model.feature_names_in_)
+            if hasattr(model, "feature_names_in_") else list(new_data.keys())
+        )
         validate_input_features(new_data, required_features)
         
-        # Prepare input DataFrame and scale it
         new_data_df = pd.DataFrame([new_data])
         new_data_scaled = scaler.transform(new_data_df[required_features])
         
-        # Make prediction and retrieve probabilities
         prediction = model.predict(new_data_scaled)
         prediction_proba = model.predict_proba(new_data_scaled)
         
-        proba_dict = {cls: float(prob) for cls, prob in zip(model.classes_, prediction_proba[0])}
+        proba_dict = {
+            cls: float(prob)
+            for cls, prob in zip(model.classes_, prediction_proba[0])
+        }
         
         logger.info(f"Prediction: {prediction[0]}")
         logger.debug(f"Class probabilities: {proba_dict}")
@@ -383,8 +440,12 @@ def predict_new_data(model_path: str, scaler_path: str, new_data: Dict[str, Any]
 
 # ---------------------- COMMAND LINE INTERFACE ---------------------- #
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Cognitive Workload Assessment Tool')
+    """
+    Parse command line arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description='Cognitive Workload Assessment Tool'
+    )
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
     
     # Train command
@@ -399,37 +460,50 @@ def parse_args() -> argparse.Namespace:
     # List models command
     subparsers.add_parser('list-models', help='List available trained models')
     
-    return parser.parse_args()
+    # Set default action when no command is provided
+    args = parser.parse_args()
+    if args.command is None:
+        parser.print_help()
+        parser.exit(1, "Error: No command specified. Use 'train', 'predict', or 'list-models'.\n")
+    
+    return args
 
 
 def find_latest_model() -> Tuple[str, str]:
-    """Find the latest trained model in the models directory."""
+    """
+    Find the latest trained model in the models directory, with robust version parsing.
+    """
     models_path = Path(MODEL_OUTPUT_DIR)
     model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
-    
+
     if not model_files:
         logger.error("No trained models found")
         return None, None
+
+    # Use max() with st_mtime for the newest model by modification time
+    latest_model = max(model_files, key=lambda x: x.stat().st_mtime)
     
-    # Sort by modification time (newest first)
-    latest_model = sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True)[0]
-    # Extract version string (assumes naming convention: MODEL_NAME_<version>.joblib)
+    # Example: Cognitive_State_Prediction_Model_20231012_103000.joblib
     parts = latest_model.stem.split('_')
-    if len(parts) < 2:
-        logger.error("Unexpected model file naming convention.")
-        return None, None
-    model_version = '_'.join(parts[-2:])
+    if len(parts) < 3:
+        logger.warning(f"Unexpected model naming convention for {latest_model.name}. Using fallback timestamp.")
+        model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    else:
+        # Join everything after the first two parts as the version
+        model_version = '_'.join(parts[2:])
+    
     scaler_file = models_path / f"scaler_{model_version}.joblib"
-    
     if not scaler_file.exists():
-        logger.error(f"Scaler file not found for model {latest_model}")
+        logger.error(f"Scaler file not found: {scaler_file}")
         return None, None
-    
+
     return str(latest_model), str(scaler_file)
 
 
 def list_available_models() -> None:
-    """List all available trained models."""
+    """
+    List all available trained models in the models directory.
+    """
     models_path = Path(MODEL_OUTPUT_DIR)
     model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
     
@@ -439,22 +513,23 @@ def list_available_models() -> None:
     
     print("\nAvailable trained models:")
     print("-" * 80)
-    print(f"{'Model Name':<50} {'Creation Date':<20} {'Size (KB)':<10}")
+    print(f"{'Model Name':<50} {'Modified Date':<22} {'Size (KB)':<10}")
     print("-" * 80)
     
     for model_file in sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True):
-        creation_time = datetime.fromtimestamp(model_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        mod_time = datetime.fromtimestamp(model_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         size_kb = model_file.stat().st_size / 1024
-        print(f"{model_file.name:<50} {creation_time:<20} {size_kb:.2f}")
+        print(f"{model_file.name:<50} {mod_time:<22} {size_kb:.2f}")
 
 
-# ---------------------- MAIN EXECUTION ---------------------- #
 def main() -> None:
-    """Main entry point for the application."""
+    """
+    Main entry point for the application.
+    """
     args = parse_args()
     
     if args.command == 'train':
-        logger.info("Starting model training pipeline")
+        logger.info("Starting full model training pipeline.")
         try:
             # Load and preprocess data
             df_physio, df_eeg, df_gaze = load_data()
@@ -482,7 +557,7 @@ def main() -> None:
         if not model_path or not scaler_path:
             model_path, scaler_path = find_latest_model()
             if not model_path or not scaler_path:
-                logger.error("No trained models found and no model path provided")
+                logger.error("No trained models found and no model path provided.")
                 sys.exit(1)
             logger.info(f"Using latest model: {model_path}")
             logger.info(f"Using latest scaler: {scaler_path}")
@@ -494,7 +569,7 @@ def main() -> None:
             
             prediction, probabilities = predict_new_data(model_path, scaler_path, input_data)
             
-            # Output prediction results
+            # Output prediction result
             print("\nPrediction Results:")
             print("-" * 50)
             print(f"Predicted Cognitive State: {prediction}")
@@ -510,8 +585,10 @@ def main() -> None:
         list_available_models()
     
     else:
-        logger.error("No command specified. Use 'train', 'predict', or 'list-models'.")
+        logger.error(f"Unknown command: {args.command}")
+        logger.error("Use 'train', 'predict', or 'list-models'.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

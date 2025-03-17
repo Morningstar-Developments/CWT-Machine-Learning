@@ -16,20 +16,24 @@ This project implements a machine learning pipeline for predicting cognitive wor
 ## Installation
 
 1. Clone this repository:
+
 ```
 git clone https://github.com/yourusername/CWT-Learning_Model.git
 cd CWT-Learning_Model
 ```
 
 2. Install dependencies:
+
 ```
 pip install -r requirements.txt
 ```
 
 3. Set up configuration:
+
 ```
 cp .env.example .env
 ```
+
 Edit the `.env` file to configure data paths and other settings.
 
 ## Project Structure
@@ -54,6 +58,7 @@ python cwt.py train
 ```
 
 This will:
+
 1. Load the data files specified in your config
 2. Preprocess the data
 3. Train a Random Forest classifier
@@ -67,6 +72,7 @@ python cwt.py predict --input data/example_input.json
 ```
 
 You can specify a specific model to use:
+
 ```
 python cwt.py predict --input data/example_input.json --model models/your_model.joblib --scaler models/your_scaler.joblib
 ```
@@ -103,6 +109,7 @@ The prediction function expects a JSON file with the following structure:
 ## Data Requirements
 
 The pipeline expects three CSV files:
+
 - Physiological data with heart rate, blood pressure, etc.
 - EEG data with brain wave metrics
 - Gaze tracking data with eye movements and pupil measurements
@@ -112,6 +119,7 @@ All files must have a 'timestamp' column for synchronization.
 ## Customization
 
 You can modify the `.env` file to customize:
+
 - Data file paths
 - Model output directory
 - Logging configuration
@@ -123,5 +131,4 @@ MIT License
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
-
+Contributions are welcome! Please feel free to submit a Pull Request.

@@ -55,12 +55,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger('cwt')
 
-# Data paths
+# Data paths - Fix path configuration
 DATA_FILES = {
     "physiological": os.getenv('PHYSIO_DATA_PATH', 'data/Enhanced_Workload_Clinical_Data.csv'),
     "eeg": os.getenv('EEG_DATA_PATH', 'data/000_EEG_Cluster_ANOVA_Results.csv'),
     "gaze": os.getenv('GAZE_DATA_PATH', 'data/008_01.csv')
 }
+
+# Check if data directories exist and create them if not
+os.makedirs(os.path.dirname(DATA_FILES["physiological"]), exist_ok=True)
+os.makedirs(os.path.dirname(DATA_FILES["eeg"]), exist_ok=True)
+os.makedirs(os.path.dirname(DATA_FILES["gaze"]), exist_ok=True)
+
+# Log data file paths for debugging
+logger.debug(f"Physiological data file path: {DATA_FILES['physiological']}")
+logger.debug(f"EEG data file path: {DATA_FILES['eeg']}")
+logger.debug(f"Gaze data file path: {DATA_FILES['gaze']}")
 
 # Model configuration
 MODEL_OUTPUT_DIR = os.getenv('MODEL_OUTPUT_DIR', 'models')
@@ -81,8 +91,11 @@ os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 def validate_file_exists(file_path):
     """Validate that a file exists on disk."""
     if not os.path.exists(file_path):
-        logger.error(f"File not found: {file_path}")
-        raise FileNotFoundError(f"File not found: {file_path}")
+        error_msg = f"File not found: {file_path}"
+        logger.error(error_msg)
+        print(f"\nERROR: {error_msg}")
+        print("Please check if the file exists or update your configuration.")
+        raise FileNotFoundError(error_msg)
     return True
 
 def safe_read_csv(file_path):
@@ -370,18 +383,29 @@ def parse_args():
     
     # Predict command
     predict_parser = subparsers.add_parser('predict', help='Make predictions with a trained model')
-    predict_parser.add_argument('--input', '-i', type=str, help='JSON file with input data')
+    predict_parser.add_argument('--input', '-i', type=str, required=True, help='JSON file with input data')
     predict_parser.add_argument('--model', '-m', type=str, help='Path to model file')
     predict_parser.add_argument('--scaler', '-s', type=str, help='Path to scaler file')
     
     # List models command
     list_parser = subparsers.add_parser('list-models', help='List available trained models')
     
-    return parser.parse_args()
+    # Handle case where no command is provided
+    args = parser.parse_args()
+    if args.command is None:
+        parser.print_help()
+        parser.exit(1, "Error: No command specified. Use 'train', 'predict', or 'list-models'.\n")
+    
+    return args
 
 def find_latest_model():
     """Find the latest trained model in the models directory."""
     models_path = Path(MODEL_OUTPUT_DIR)
+    
+    # Create models directory if it doesn't exist
+    os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+    
+    # Look for model files
     model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
     
     if not model_files:
@@ -390,12 +414,34 @@ def find_latest_model():
     
     # Sort by modification time (newest first)
     latest_model = sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True)[0]
-    model_version = latest_model.stem.split('_')[-2] + '_' + latest_model.stem.split('_')[-1]
+    
+    # Extract version information safely
+    try:
+        # Get the timestamp part of the filename
+        model_stem = latest_model.stem  # e.g., "Cognitive_State_Prediction_Model_20230101_120000"
+        parts = model_stem.split('_')
+        
+        # The version should be the date and time parts at the end
+        if len(parts) >= 5:  # Ensure there are enough parts
+            # Join the last two parts which should be date and time
+            model_version = f"{parts[-2]}_{parts[-1]}"
+        else:
+            # Fallback if naming convention is unexpected
+            logger.warning(f"Unexpected model file naming convention: {latest_model.name}")
+            model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    except Exception as e:
+        logger.warning(f"Error extracting model version: {str(e)}")
+        model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Look for corresponding scaler file
     scaler_file = models_path / f"scaler_{model_version}.joblib"
     
     if not scaler_file.exists():
         logger.error(f"Scaler file not found for model {latest_model}")
         return None, None
+    
+    logger.info(f"Found latest model: {latest_model}")
+    logger.info(f"Found corresponding scaler: {scaler_file}")
     
     return str(latest_model), str(scaler_file)
 
@@ -426,6 +472,14 @@ def main():
     if args.command == 'train':
         logger.info("Starting model training pipeline")
         try:
+            # Check if data files exist before proceeding
+            for data_type, file_path in DATA_FILES.items():
+                if not os.path.exists(file_path):
+                    logger.error(f"{data_type.capitalize()} data file not found: {file_path}")
+                    print(f"\nERROR: {data_type.capitalize()} data file not found at: {file_path}")
+                    print("Please ensure your data files are in the correct location or update your .env file with the correct paths.")
+                    sys.exit(1)
+            
             # Load data
             df_physio, df_eeg, df_gaze = load_data()
             
@@ -445,26 +499,34 @@ def main():
             
         except Exception as e:
             logger.error(f"Training pipeline failed: {str(e)}")
+            print(f"\nERROR: Training pipeline failed: {str(e)}")
             sys.exit(1)
     
     elif args.command == 'predict':
-        if not args.input:
-            logger.error("Input file is required for prediction")
-            sys.exit(1)
-        
         model_path = args.model
         scaler_path = args.scaler
         
-        # If model path not provided, find the latest model
+        # If model or scaler paths are not provided, try to find the latest ones
         if not model_path or not scaler_path:
             model_path, scaler_path = find_latest_model()
             if not model_path or not scaler_path:
                 logger.error("No trained models found and no model path provided")
+                print("\nERROR: No trained models found in the models directory.")
+                print("Please train a model first using the 'train' command:")
+                print("  python cwt.py train")
+                print("\nOr specify a model and scaler path explicitly:")
+                print("  python cwt.py predict --input data.json --model path/to/model.joblib --scaler path/to/scaler.joblib")
                 sys.exit(1)
             logger.info(f"Using latest model: {model_path}")
             logger.info(f"Using latest scaler: {scaler_path}")
         
         try:
+            # Verify that input file exists
+            if not os.path.exists(args.input):
+                logger.error(f"Input file not found: {args.input}")
+                print(f"\nERROR: Input file not found: {args.input}")
+                sys.exit(1)
+            
             # Load input data
             with open(args.input, 'r') as f:
                 input_data = json.load(f)
@@ -482,13 +544,15 @@ def main():
             
         except Exception as e:
             logger.error(f"Prediction failed: {str(e)}")
+            print(f"\nERROR: Prediction failed: {str(e)}")
             sys.exit(1)
     
     elif args.command == 'list-models':
         list_available_models()
     
     else:
-        logger.error("No command specified. Use 'train', 'predict', or 'list-models'.")
+        logger.error(f"Unknown command: {args.command}")
+        logger.error("Use 'train', 'predict', or 'list-models'.")
         sys.exit(1)
 
 if __name__ == "__main__":

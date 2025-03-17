@@ -12,3 +12,11 @@
 *.egg-info
 *.joblib
 *.joblib
+*.log
+*.logs
+
+/data
+/models
+/logs
+
+.env
