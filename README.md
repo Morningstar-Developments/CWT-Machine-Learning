@@ -1,134 +1,149 @@
-# Cognitive Workload Tracking (CWT) Learning Model
+# Cognitive Workload Assessment Tool (CWT)
 
-This project implements a machine learning pipeline for predicting cognitive workload states based on physiological, EEG, and gaze tracking data. The tool can be used to classify cognitive states as Low, Medium, or High.
+This tool implements a machine learning pipeline for predicting cognitive workload states based on physiological, EEG, and gaze tracking data. The tool can be used to classify cognitive states as Low, Medium, or High.
 
 ## Features
 
 - Multi-modal data integration (physiological, EEG, and gaze tracking)
-- Robust data preprocessing and feature engineering
-- Random Forest-based classification model
-- Cross-validation for model reliability assessment
-- Feature importance visualization
-- Comprehensive logging
-- Model versioning and metadata tracking
-- Command-line interface for training and predictions
+- Support for multiple machine learning algorithms:
+  - Random Forest
+  - Support Vector Machine
+  - Gradient Boosting
+  - Neural Network (MLP)
+  - K-Nearest Neighbors
+  - Logistic Regression
+- Automatic data preprocessing and feature standardization
+- Model persistence and metadata tracking
+- Visualization of model performance
+- Pre-trained sample models for immediate use
 
 ## Installation
 
 1. Clone this repository:
 
-```
+```bash
 git clone https://github.com/yourusername/CWT-Learning_Model.git
 cd CWT-Learning_Model
 ```
 
-2. Install dependencies:
+2. Create a virtual environment and activate it:
 
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
+
+3. Install dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-3. Set up configuration:
+## Quick Start
 
-```
-cp .env.example .env
-```
+### Install Sample Models
 
-Edit the `.env` file to configure data paths and other settings.
+To quickly get started with pre-trained models (no real data needed):
 
-## Project Structure
-
-```
-CWT-Learning_Model/
-├── data/                  # Input data files
-├── models/                # Saved models and metadata
-├── logs/                  # Log files
-├── cwt.py                 # Main application code
-├── requirements.txt       # Project dependencies
-├── .env.example           # Environment config template
-└── README.md              # This file
+```bash
+python cwt.py install-models
 ```
 
-## Usage
-
-### Train a New Model
-
-```
-python cwt.py train
-```
-
-This will:
-
-1. Load the data files specified in your config
-2. Preprocess the data
-3. Train a Random Forest classifier
-4. Generate performance metrics and visualizations
-5. Save the trained model and metadata
+This will create sample models trained on synthetic data and a sample input file for testing.
 
 ### Make Predictions
 
-```
-python cwt.py predict --input data/example_input.json
-```
+After installing sample models, you can make predictions:
 
-You can specify a specific model to use:
-
+```bash
+python cwt.py predict --input data/sample_input.json
 ```
-python cwt.py predict --input data/example_input.json --model models/your_model.joblib --scaler models/your_scaler.joblib
-```
-
-If no model is specified, the most recent model will be used.
 
 ### List Available Models
 
-```
+To see all available trained models:
+
+```bash
 python cwt.py list-models
 ```
 
-## Input Data Format
+### Train a New Model
 
-The prediction function expects a JSON file with the following structure:
+To train a new model with your own data:
 
-```json
-{
-  "pulse_rate": 75.2,
-  "blood_pressure_sys": 120.5,
-  "resp_rate": 16.4,
-  "pupil_diameter_left": 5.2,
-  "pupil_diameter_right": 5.1,
-  "fixation_duration": 245.8,
-  "blink_rate": 12.3,
-  "workload_intensity": 0.0,
-  "gaze_x": 512.3,
-  "gaze_y": 384.7,
-  "alpha_power": 18.5,
-  "theta_power": 22.6
-}
+```bash
+python cwt.py train
 ```
 
-## Data Requirements
+Or specify a model type:
 
-The pipeline expects three CSV files:
+```bash
+python cwt.py train --model-type rf  # Random Forest
+```
 
-- Physiological data with heart rate, blood pressure, etc.
-- EEG data with brain wave metrics
-- Gaze tracking data with eye movements and pupil measurements
+## Data Format
 
-All files must have a 'timestamp' column for synchronization.
+The tool expects data in the following format:
 
-## Customization
+1. Physiological data with heart rate, blood pressure, etc.
+2. EEG data with brain wave measurements
+3. Gaze tracking data with eye movement metrics
 
-You can modify the `.env` file to customize:
+Each data file should include a timestamp column for synchronization.
 
-- Data file paths
-- Model output directory
-- Logging configuration
-- Training parameters
+Sample data can be generated using:
+
+```bash
+python generate_sample_data.py
+```
+
+## Configuration
+
+You can customize the tool by modifying the `.env` file:
+
+```
+# Data files
+PHYSIO_DATA_PATH=data/Enhanced_Workload_Clinical_Data.csv
+EEG_DATA_PATH=data/000_EEG_Cluster_ANOVA_Results.csv
+GAZE_DATA_PATH=data/008_01.csv
+
+# Model configuration
+MODEL_OUTPUT_DIR=models
+MODEL_NAME=Cognitive_State_Prediction_Model
+
+# Logging configuration
+LOG_LEVEL=INFO
+LOG_FILE=logs/cwt.log
+
+# Training parameters
+TEST_SIZE=0.2
+RANDOM_SEED=42
+
+# Default model type
+DEFAULT_MODEL_TYPE=rf
+```
+
+## Troubleshooting
+
+If you encounter issues with data paths:
+
+1. Ensure your data files are in the locations specified in `.env`
+2. Or run `python cwt.py install-models` to use sample data and models
 
 ## License
 
-MIT License
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Contributing
+## Citation
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+If you use this tool in your research, please cite it as:
+
+```
+@software{CognitiveWorkloadTool,
+  author = {Your Name},
+  title = {Cognitive Workload Assessment Tool},
+  year = {2025},
+  url = {https://github.com/yourusername/CWT-Learning_Model}
+}
+```
+
