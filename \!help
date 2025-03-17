@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# Redirect to cwt-help.sh script
+./utilities/cwt-help.sh "$@"

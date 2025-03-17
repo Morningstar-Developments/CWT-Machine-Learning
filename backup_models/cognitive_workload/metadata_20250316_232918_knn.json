@@ -1,0 +1,57 @@
+{
+    "model_version": "20250316_232918_knn",
+    "model_type": "knn",
+    "model_name": "K-Nearest Neighbors",
+    "training_date": "2025-03-16T23:29:18.147876",
+    "accuracy": 0.905,
+    "classification_report": {
+        "High": {
+            "precision": 0.9056603773584906,
+            "recall": 0.8135593220338984,
+            "f1-score": 0.8571428571428571,
+            "support": 59.0
+        },
+        "Low": {
+            "precision": 0.9827586206896551,
+            "recall": 0.9344262295081968,
+            "f1-score": 0.957983193277311,
+            "support": 61.0
+        },
+        "Medium": {
+            "precision": 0.8539325842696629,
+            "recall": 0.95,
+            "f1-score": 0.8994082840236687,
+            "support": 80.0
+        },
+        "accuracy": 0.905,
+        "macro avg": {
+            "precision": 0.9141171941059362,
+            "recall": 0.8993285171806983,
+            "f1-score": 0.9048447781479455,
+            "support": 200.0
+        },
+        "weighted avg": {
+            "precision": 0.9084842243389647,
+            "recall": 0.905,
+            "f1-score": 0.9048053304161902,
+            "support": 200.0
+        }
+    },
+    "features": [
+        "pulse_rate",
+        "blood_pressure_sys",
+        "resp_rate",
+        "pupil_diameter_left",
+        "pupil_diameter_right",
+        "fixation_duration",
+        "blink_rate",
+        "gaze_x",
+        "gaze_y",
+        "theta_power"
+    ],
+    "parameters": {
+        "test_size": 0.2,
+        "random_seed": 46
+    },
+    "note": "This is a sample model trained on synthetic data for demonstration purposes."
+}

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Utility to check and fix model/scaler compatibility
+python utilities/check_models.py "$@"

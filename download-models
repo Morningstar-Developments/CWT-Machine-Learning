@@ -1,0 +1,3 @@
+#!/bin/bash
+# Download advanced pre-trained models
+python utilities/download_advanced_models.py "$@"

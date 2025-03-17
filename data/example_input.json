@@ -1,0 +1,14 @@
+{
+  "pulse_rate": 75.2,
+  "blood_pressure_sys": 120.5,
+  "resp_rate": 16.4,
+  "pupil_diameter_left": 5.2,
+  "pupil_diameter_right": 5.1,
+  "fixation_duration": 245.8,
+  "blink_rate": 12.3,
+  "workload_intensity": 0.0,
+  "gaze_x": 512.3,
+  "gaze_y": 384.7,
+  "alpha_power": 18.5,
+  "theta_power": 22.6
+} 

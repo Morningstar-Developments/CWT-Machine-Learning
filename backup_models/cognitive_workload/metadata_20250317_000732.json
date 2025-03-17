@@ -1,0 +1,57 @@
+{
+    "model_version": "20250317_000732",
+    "model_type": "rf",
+    "model_name": "Random Forest",
+    "training_date": "2025-03-17T00:07:33.368412",
+    "accuracy": 0.35,
+    "classification_report": {
+        "High": {
+            "precision": 0.4117647058823529,
+            "recall": 0.4117647058823529,
+            "f1-score": 0.4117647058823529,
+            "support": 34.0
+        },
+        "Low": {
+            "precision": 0.34782608695652173,
+            "recall": 0.24242424242424243,
+            "f1-score": 0.2857142857142857,
+            "support": 33.0
+        },
+        "Medium": {
+            "precision": 0.3023255813953488,
+            "recall": 0.3939393939393939,
+            "f1-score": 0.34210526315789475,
+            "support": 33.0
+        },
+        "accuracy": 0.35,
+        "macro avg": {
+            "precision": 0.35397212474474116,
+            "recall": 0.3493761140819964,
+            "f1-score": 0.34652808491817777,
+            "support": 100.0
+        },
+        "weighted avg": {
+            "precision": 0.35455005055611727,
+            "recall": 0.35,
+            "f1-score": 0.3471804511278196,
+            "support": 100.0
+        }
+    },
+    "features": [
+        "pulse_rate",
+        "blood_pressure_sys",
+        "resp_rate",
+        "pupil_diameter_left",
+        "pupil_diameter_right",
+        "fixation_duration",
+        "blink_rate",
+        "gaze_x",
+        "gaze_y",
+        "alpha_power",
+        "theta_power"
+    ],
+    "parameters": {
+        "test_size": 0.2,
+        "random_seed": 42
+    }
+}

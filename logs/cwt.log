@@ -1,0 +1,122 @@
+2025-03-16 23:39:38,380 - cwt - INFO - Starting model training pipeline
+2025-03-16 23:39:38,380 - cwt - INFO - Selected model type: rf (Random Forest)
+2025-03-16 23:39:38,380 - cwt - INFO - Loading data files...
+2025-03-16 23:39:38,393 - cwt - INFO - Loaded physiological data: (500, 12)
+2025-03-16 23:39:38,393 - cwt - INFO - Loaded EEG data: (500, 75)
+2025-03-16 23:39:38,393 - cwt - INFO - Loaded gaze data: (500, 12)
+2025-03-16 23:39:38,393 - cwt - INFO - Preprocessing data...
+2025-03-16 23:39:38,404 - cwt - WARNING - Missing values detected after merge: 
+subject_id_y            1
+alpha_power             1
+theta_power             1
+AF3_alpha               1
+AF3_beta                1
+                       ..
+saccade_length          1
+blink_rate              1
+cognitive_load          1
+pupil_diameter_left     1
+pupil_diameter_right    1
+Length: 85, dtype: int64
+2025-03-16 23:39:38,404 - cwt - INFO - Dropping rows with missing values
+2025-03-16 23:39:38,408 - cwt - INFO - Preprocessing complete. Final dataset shape: (499, 13)
+2025-03-16 23:39:38,409 - cwt - INFO - Scaler saved to models/scaler_20250316_233938.joblib
+2025-03-16 23:39:38,409 - cwt - INFO - Training model of type: rf
+2025-03-16 23:39:38,411 - cwt - INFO - Creating model of type: rf (Random Forest)
+2025-03-16 23:39:38,929 - cwt - INFO - Cross-validation scores: [0.475      0.4125     0.275      0.375      0.32911392]
+2025-03-16 23:39:38,929 - cwt - INFO - Mean CV accuracy: 0.373 ± 0.069
+2025-03-16 23:39:38,929 - cwt - INFO - Fitting model on training data
+2025-03-16 23:39:39,048 - cwt - INFO - Model Accuracy: 0.350
+2025-03-16 23:39:39,051 - cwt - INFO - Classification Report:
+               precision    recall  f1-score   support
+
+        High       0.41      0.41      0.41        34
+         Low       0.35      0.24      0.29        33
+      Medium       0.30      0.39      0.34        33
+
+    accuracy                           0.35       100
+   macro avg       0.35      0.35      0.35       100
+weighted avg       0.35      0.35      0.35       100
+
+2025-03-16 23:39:39,244 - cwt - INFO - Confusion matrix plot saved to models/confusion_matrix_20250316_233938.png
+2025-03-16 23:39:39,316 - cwt - INFO - Feature importance plot saved to models/feature_importance_20250316_233938.png
+2025-03-16 23:39:39,316 - cwt - INFO - Saving model to models/Cognitive_State_Prediction_Model_20250316_233938.joblib
+2025-03-16 23:39:39,339 - cwt - INFO - Model metadata saved to models/metadata_20250316_233938.json
+2025-03-16 23:39:39,339 - cwt - INFO - Model training complete. Accuracy: 0.350
+2025-03-16 23:39:39,339 - cwt - INFO - Model saved at models/Cognitive_State_Prediction_Model_20250316_233938.joblib
+2025-03-16 23:39:39,339 - cwt - INFO - Scaler saved at models/scaler_20250316_233938.joblib
+2025-03-16 23:41:14,876 - cwt - INFO - Installing sample model of type: rf
+2025-03-16 23:41:14,877 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:14,888 - cwt - INFO - Creating model of type: rf (Random Forest)
+2025-03-16 23:41:15,059 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234114_rf.joblib with accuracy 0.905
+2025-03-16 23:41:15,059 - cwt - INFO - Installing sample model of type: svm
+2025-03-16 23:41:15,059 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:15,063 - cwt - INFO - Creating model of type: svm (Support Vector Machine)
+2025-03-16 23:41:15,113 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234115_svm.joblib with accuracy 0.875
+2025-03-16 23:41:15,113 - cwt - INFO - Installing sample model of type: gb
+2025-03-16 23:41:15,113 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:15,118 - cwt - INFO - Creating model of type: gb (Gradient Boosting)
+2025-03-16 23:41:15,736 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234115_gb.joblib with accuracy 0.845
+2025-03-16 23:41:15,736 - cwt - INFO - Installing sample model of type: mlp
+2025-03-16 23:41:15,736 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:15,739 - cwt - INFO - Creating model of type: mlp (Neural Network (MLP))
+2025-03-16 23:41:16,052 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234115_mlp.joblib with accuracy 0.900
+2025-03-16 23:41:16,052 - cwt - INFO - Installing sample model of type: knn
+2025-03-16 23:41:16,052 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:16,056 - cwt - INFO - Creating model of type: knn (K-Nearest Neighbors)
+2025-03-16 23:41:16,066 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234116_knn.joblib with accuracy 0.905
+2025-03-16 23:41:16,066 - cwt - INFO - Installing sample model of type: lr
+2025-03-16 23:41:16,066 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:16,070 - cwt - INFO - Creating model of type: lr (Logistic Regression)
+2025-03-16 23:41:16,081 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234116_lr.joblib with accuracy 0.695
+2025-03-16 23:41:16,082 - cwt - INFO - Generating synthetic data with 1 samples and 10 features
+2025-03-16 23:41:16,083 - cwt - INFO - Sample input data saved to data/sample_input.json
+2025-03-16 23:45:03,952 - cwt - ERROR - Scaler file not found for model models/Cognitive_State_Prediction_Model_20250316_234116_lr.joblib
+2025-03-16 23:45:03,952 - cwt - ERROR - No trained models found and no model path provided
+2025-03-16 23:45:15,082 - cwt - INFO - Starting model training pipeline
+2025-03-16 23:45:15,083 - cwt - INFO - Selected model type: rf (Random Forest)
+2025-03-16 23:45:15,083 - cwt - INFO - Loading data files...
+2025-03-16 23:45:15,095 - cwt - INFO - Loaded physiological data: (500, 12)
+2025-03-16 23:45:15,095 - cwt - INFO - Loaded EEG data: (500, 75)
+2025-03-16 23:45:15,095 - cwt - INFO - Loaded gaze data: (500, 12)
+2025-03-16 23:45:15,095 - cwt - INFO - Preprocessing data...
+2025-03-16 23:45:15,108 - cwt - WARNING - Missing values detected after merge: 
+subject_id_y            1
+alpha_power             1
+theta_power             1
+AF3_alpha               1
+AF3_beta                1
+                       ..
+saccade_length          1
+blink_rate              1
+cognitive_load          1
+pupil_diameter_left     1
+pupil_diameter_right    1
+Length: 85, dtype: int64
+2025-03-16 23:45:15,108 - cwt - INFO - Dropping rows with missing values
+2025-03-16 23:45:15,115 - cwt - INFO - Preprocessing complete. Final dataset shape: (499, 13)
+2025-03-16 23:45:15,116 - cwt - INFO - Scaler saved to models/scaler_20250316_234515.joblib
+2025-03-16 23:45:15,116 - cwt - INFO - Training model of type: rf
+2025-03-16 23:45:15,118 - cwt - INFO - Creating model of type: rf (Random Forest)
+2025-03-16 23:45:15,555 - cwt - INFO - Cross-validation scores: [0.475      0.4125     0.275      0.375      0.32911392]
+2025-03-16 23:45:15,555 - cwt - INFO - Mean CV accuracy: 0.373 ± 0.069
+2025-03-16 23:45:15,555 - cwt - INFO - Fitting model on training data
+2025-03-16 23:45:15,651 - cwt - INFO - Model Accuracy: 0.350
+2025-03-16 23:45:15,654 - cwt - INFO - Classification Report:
+               precision    recall  f1-score   support
+
+        High       0.41      0.41      0.41        34
+         Low       0.35      0.24      0.29        33
+      Medium       0.30      0.39      0.34        33
+
+    accuracy                           0.35       100
+   macro avg       0.35      0.35      0.35       100
+weighted avg       0.35      0.35      0.35       100
+
+2025-03-16 23:45:15,834 - cwt - INFO - Confusion matrix plot saved to models/confusion_matrix_20250316_234515.png
+2025-03-16 23:45:15,902 - cwt - INFO - Feature importance plot saved to models/feature_importance_20250316_234515.png
+2025-03-16 23:45:15,902 - cwt - INFO - Saving model to models/Cognitive_State_Prediction_Model_20250316_234515.joblib
+2025-03-16 23:45:15,925 - cwt - INFO - Model metadata saved to models/metadata_20250316_234515.json
+2025-03-16 23:45:15,925 - cwt - INFO - Model training complete. Accuracy: 0.350
+2025-03-16 23:45:15,925 - cwt - INFO - Model saved at models/Cognitive_State_Prediction_Model_20250316_234515.joblib
+2025-03-16 23:45:15,925 - cwt - INFO - Scaler saved at models/scaler_20250316_234515.joblib

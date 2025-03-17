@@ -1,0 +1,3 @@
+#!/bin/bash
+# Shortcut to display CWT help
+./utilities/cwt-help.sh "$@"
