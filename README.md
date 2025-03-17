@@ -212,6 +212,48 @@ If you encounter issues with data paths:
 1. Ensure your data files are in the locations specified in `.env`
 2. Or run `python cwt.py install-models` to use sample data and models
 
+### Scaler File Issues
+
+If you encounter errors related to scaler files not being found:
+
+1. Use explicit model and scaler paths when making predictions:
+
+   ```bash
+   python cwt.py predict --input data/sample_input.json --model models/sample/rf/your_model.joblib --scaler models/sample/rf/your_scaler.joblib
+   ```
+
+2. Verify the scaler file exists in the same directory as the model:
+
+   ```bash
+   # List models and their scalers
+   find models -name "cognitive_state_predictor_*.joblib" | sort
+   find models -name "scaler_*.joblib" | sort
+   ```
+
+3. Reinstall sample models to ensure consistent naming:
+
+   ```bash
+   python cwt.py install-models
+   ```
+
+4. Run the organize_outputs.py script to organize your models and scalers:
+
+   ```bash
+   python organize_outputs.py
+   ```
+
+5. Use the check_models.py diagnostic tool:
+
+   ```bash
+   # Check all models and their scalers
+   ./check_models.py
+   
+   # Automatically fix scaler issues
+   ./check_models.py --fix
+   ```
+
+   This tool will identify models missing scalers and create them automatically when run with the `--fix` flag.
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

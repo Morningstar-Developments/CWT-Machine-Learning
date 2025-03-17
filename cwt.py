@@ -533,6 +533,23 @@ def predict_new_data(model_path, scaler_path, new_data):
         tuple: (predicted_cognitive_state, class_probabilities)
     """
     try:
+        # Validate that files exist
+        if not os.path.exists(model_path):
+            error_msg = f"Model file not found: {model_path}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+            
+        if not os.path.exists(scaler_path):
+            error_msg = f"Scaler file not found: {scaler_path}"
+            logger.error(error_msg)
+            # Suggest potential scaler file locations
+            model_dir = os.path.dirname(model_path)
+            potential_scalers = list(Path(model_dir).glob("scaler_*.joblib"))
+            if potential_scalers:
+                logger.info(f"Available scalers in the model directory: {potential_scalers}")
+                logger.info("Try specifying one of these scalers with the --scaler parameter")
+            raise FileNotFoundError(error_msg)
+        
         logger.info(f"Loading model from {model_path}")
         model = joblib.load(model_path)
         
@@ -933,35 +950,44 @@ def find_latest_model():
     # Try different possible naming patterns for the scaler
     if len(model_parts) >= 3:  # Should have at least "MODEL_NAME_TIMESTAMP_TYPE"
         model_type = model_parts[-1]  # Last part should be the model type (rf, svm, etc.)
-        timestamp = model_parts[-2]  # Second to last part should be the timestamp
+        timestamp_parts = []
         
-        # Try all possible naming patterns for the scaler
-        scaler_patterns = [
-            # Pattern from install_sample_model: "scaler_TIMESTAMP_TYPE.joblib"
-            latest_model.parent / f"scaler_{timestamp}_{model_type}.joblib",
-            
-            # Pattern with just the date part (common in sample models): "scaler_DATEPART_TYPE.joblib"
-            latest_model.parent / f"scaler_{timestamp.split('_')[0]}_{model_type}.joblib",
-            
-            # Simplified pattern: "scaler_TYPE.joblib"
-            latest_model.parent / f"scaler_{model_type}.joblib",
-            
-            # Pattern with just timestamp: "scaler_TIMESTAMP.joblib"
-            latest_model.parent / f"scaler_{timestamp}.joblib",
-            
-            # Try parent directory
-            Path('models') / f"scaler_{timestamp}_{model_type}.joblib",
-            Path('models') / f"scaler_{timestamp}.joblib"
-        ]
+        # Extract timestamp parts from the model filename
+        # The model filename format should be like: cognitive_state_predictor_20250317_001647_rf.joblib
+        # So we need to find all the numeric parts that could be part of the timestamp
+        for part in model_parts:
+            if part.isdigit() or (len(part) > 0 and part[0].isdigit()):
+                timestamp_parts.append(part)
         
-        # Try each pattern
-        for scaler_path in scaler_patterns:
-            if scaler_path.exists():
-                logger.info(f"Found corresponding scaler: {scaler_path}")
-                return str(latest_model), str(scaler_path)
+        # If we found timestamp parts, use them to build scaler patterns
+        if timestamp_parts:
+            full_timestamp = "_".join(timestamp_parts)
+            timestamp = timestamp_parts[-1] if len(timestamp_parts) > 0 else ""
+            date_part = timestamp_parts[0] if len(timestamp_parts) > 0 else ""
+            
+            # Try all possible naming patterns for the scaler
+            scaler_patterns = [
+                # Pattern we're using in install_sample_model: "scaler_EXACTSAMETIMESTAMP_TYPE.joblib"
+                latest_model.parent / f"scaler_{full_timestamp}_{model_type}.joblib",
+                
+                # Other common patterns
+                latest_model.parent / f"scaler_{date_part}_{model_type}.joblib",
+                latest_model.parent / f"scaler_{model_type}.joblib",
+                latest_model.parent / f"scaler_{timestamp}.joblib",
+                Path('models') / f"scaler_{full_timestamp}_{model_type}.joblib",
+                Path('models') / f"scaler_{date_part}_{model_type}.joblib"
+            ]
+            
+            # Try each pattern
+            for scaler_path in scaler_patterns:
+                if scaler_path.exists():
+                    logger.info(f"Found corresponding scaler: {scaler_path}")
+                    return str(latest_model), str(scaler_path)
         
         # If no pattern matched, log error
         logger.error(f"Scaler file not found for model {latest_model}")
+        # Debug: list all files in the model directory to help diagnose
+        logger.debug(f"Files in model directory: {list(latest_model.parent.glob('*'))}")
         return str(latest_model), None
     else:
         logger.error(f"Model filename {latest_model.name} does not follow expected pattern")
