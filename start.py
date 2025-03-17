@@ -36,6 +36,40 @@ MODEL_DIR = "models/ensemble"
 RESULTS_DIR = "results"
 REFERENCE_DATA_DIR = "data/reference"
 
+# Define available commands for display
+AVAILABLE_COMMANDS = {
+    "setup": "Set up the CWT environment and create necessary directories",
+    "train": "Train a specific cognitive workload model",
+    "train-all": "Train all available cognitive workload models",
+    "predict": "Predict cognitive workload from input data",
+    "batch-predict": "Batch predict cognitive workload from a CSV file",
+    "time-series-predict": "Predict cognitive workload from time series data"
+}
+
+def display_welcome_banner():
+    """Display a welcome banner with CWT tool information"""
+    banner = r"""
+   ______ _    _ _______   _______          _ 
+  / _____) |  | (_______)_(_______)        | |
+ | /     | |  | |_     _(_)  _  | |     ___| |
+ | |     | |  | | |   | | | | | | |    /___) |
+ | \_____| |__| | |   | | | |_| | |___|___ | |
+  \______)____/  |___|  |_|_____|_____|___/|_|
+                                                
+   Cognitive Workload Training Tool
+   -------------------------------
+   A comprehensive platform for cognitive workload detection and analysis
+    """
+    print(banner)
+    print("Starting CWT Tool setup and model training process...\n")
+    print("This will:")
+    print("  1. Set up the CWT environment")
+    print("  2. Train all available model types")
+    print("  3. Prepare sample data and predictions")
+    print("  4. Generate model performance visualizations\n")
+    print("=" * 70)
+    print()
+
 def run_command(command, desc=None):
     """Run a shell command and log the output"""
     if desc:
@@ -195,8 +229,52 @@ def generate_model_overview():
         logger.error(f"Error generating model overview: {str(e)}")
         return False
 
+def display_command_reference():
+    """Display a comprehensive command reference"""
+    print("\n" + "=" * 70)
+    print(" " * 25 + "COMMAND REFERENCE")
+    print("=" * 70)
+    
+    # Import commands module if available
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import commands
+        commands.print_command_help()
+    except ImportError:
+        # Fallback if commands module is not available
+        print("\nAvailable Commands:")
+        for cmd, desc in AVAILABLE_COMMANDS.items():
+            print(f"  {cmd:<20} {desc}")
+    
+    # Common command examples
+    print("\nCommon Usage Examples:")
+    print("  python cwt.py setup")
+    print("  python cwt.py train --model-type svm")
+    print("  python cwt.py train-all --parallel")
+    print("  python cwt.py predict --input-values 'pulse_rate=75' 'blood_pressure_sys=120'")
+    print("  python cwt.py batch-predict --input-file data/samples.csv --infer-missing")
+    print("  python cwt.py time-series-predict --input-file data/time_series.csv --visualize")
+    
+    print("\nFor detailed help on any command:")
+    print("  ./commands.py [command]")
+    print("  Example: ./commands.py train-all")
+    
+    print("\nUtility Scripts:")
+    print("  ./start.py            # Run this setup script again")
+    print("  ./check-models        # Verify model integrity")
+    print("  ./organize            # Organize models and logs")
+    print("  ./generate-data       # Generate sample data")
+    print("  ./download-models     # Download advanced pre-trained models")
+    
+    print("\nDocumentation:")
+    print("  See README.md for complete documentation")
+    print("=" * 70)
+
 def main():
     """Main function to run all steps"""
+    # Display welcome banner
+    display_welcome_banner()
+    
     logger.info("Starting CWT Tool automated setup")
     
     # Step 1: Setup environment
@@ -223,11 +301,16 @@ def main():
     logger.info(f"Results and visualizations are in: {RESULTS_DIR}")
     logger.info("-" * 50)
     
+    # Success message
+    print("\n" + "=" * 70)
+    print(" " * 25 + "SETUP COMPLETE")
+    print("=" * 70)
     print("\n✅ CWT Tool is now ready for analysis!")
-    print("You can now run commands like:")
-    print("  python cwt.py predict --input-values 'pulse_rate=75' 'blood_pressure_sys=120'")
-    print("  python cwt.py batch-predict --input-file data/your_data.csv --infer-missing")
-    print("  python commands.py  # For a full list of available commands")
+    print(f"• Trained models are in: {MODEL_DIR}")
+    print(f"• Results and visualizations are in: {RESULTS_DIR}")
+    
+    # Display command reference
+    display_command_reference()
     
     return 0
 

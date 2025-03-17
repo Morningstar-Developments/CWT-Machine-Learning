@@ -40,6 +40,42 @@ The CWT Tool has been enhanced with the following new features:
    - Time series analysis with sliding window approach
    - Visualization options for time series predictions
 
+5. **New Utilities**:
+   - **Command Dictionary**: Interactive help system with detailed information on all commands
+   - **Automated Start Script**: One-command setup of the entire environment with model training and analysis preparation
+
+## Quick Start
+
+To get up and running quickly with the CWT Tool, simply run:
+
+```bash
+./start.py
+```
+
+This will:
+1. Set up the CWT environment
+2. Train all available model types (with parallel processing)
+3. Prepare sample predictions and analyses
+4. Generate an overview of model performance
+
+After completion, you'll have trained models ready for use and examples of predictions in the `results` directory.
+
+## Command Reference
+
+For a complete list of available commands and their options, run:
+
+```bash
+./commands.py
+```
+
+For detailed help on a specific command:
+
+```bash
+./commands.py [command]
+```
+
+For example: `./commands.py train-all` will show all options for training all models at once.
+
 ## Working with Missing Features
 
 The CWT Tool can now handle data with missing features by using the `--infer-missing` flag:
@@ -56,6 +92,21 @@ This works by:
 4. Applying the standard prediction pipeline with the complete dataset
 
 ## Command Reference
+
+### setup
+
+```bash
+python cwt.py setup
+```
+
+### train
+
+```bash
+python cwt.py train [--model-type TYPE] [--output-dir DIR]
+```
+
+- `--model-type`: Type of model to train (svm, random_forest, knn, mlp, gradient_boosting, decision_tree)
+- `--output-dir`: Directory to save the trained model
 
 ### train-all
 
@@ -145,6 +196,8 @@ The CWT provides a command-line interface with several commands:
 python cwt.py help
 # or
 ./!help
+# or for complete command reference
+./commands.py
 ```
 
 ### Training a Model
@@ -262,6 +315,8 @@ CWT-Learning_Model/
 │   ├── organize_outputs.py      # Script to organize models and logs
 │   └── test_imports.py          # Script to test Python imports
 ├── cwt.py                       # Main script
+├── commands.py                  # Command dictionary and help system
+├── start.py                     # Automated setup and training script
 ├── requirements.txt             # Python dependencies
 ├── .env                         # Environment configuration
 └── README.md                    # This file
@@ -278,6 +333,8 @@ The CWT comes with several utility scripts that can be executed directly from th
 | `./organize` | Organize models and logs | `./organize` |
 | `./download-models` | Download advanced models | `./download-models --all` or `./download-models --model-type gb` |
 | `./!help` | Display help information | `./!help` or `./!help --topic model-types` |
+| `./commands.py` | Interactive command reference | `./commands.py` or `./commands.py [command]` |
+| `./start.py` | Automated environment setup and training | `./start.py` |
 
 To set up these shortcuts (or recreate them if needed), run:
 
@@ -406,414 +463,3 @@ If you use this tool in your research, please cite it as:
   url = {https://github.com/yourusername/CWT-Learning_Model}
 }
 ```
-
-
-#!/usr/bin/env python3
-"""
-Cognitive Workload Training (CWT) Tool - Commands Reference
-
-This module provides a comprehensive dictionary of all available commands
-and their usage examples for the CWT tool.
-"""
-
-COMMANDS = {
-    "setup": {
-        "description": "Set up the CWT environment and create necessary directories",
-        "examples": [
-            "python cwt.py setup"
-        ],
-        "options": {}
-    },
-    
-    "train": {
-        "description": "Train a specific cognitive workload model",
-        "examples": [
-            "python cwt.py train --model-type svm",
-            "python cwt.py train --model-type random_forest --output-dir models/my_models"
-        ],
-        "options": {
-            "--model-type": "Type of model to train (svm, random_forest, knn, mlp, gradient_boosting, decision_tree)",
-            "--output-dir": "Directory to save the trained model"
-        }
-    },
-    
-    "train-all": {
-        "description": "Train all available cognitive workload models",
-        "examples": [
-            "python cwt.py train-all",
-            "python cwt.py train-all --parallel --output-dir models/ensemble",
-            "python cwt.py train-all --skip-types svm,knn"
-        ],
-        "options": {
-            "--output-dir": "Directory to save trained models (default: models/)",
-            "--parallel": "Train models in parallel for faster execution",
-            "--skip-types": "Comma-separated list of model types to skip"
-        }
-    },
-    
-    "predict": {
-        "description": "Predict cognitive workload from input data",
-        "examples": [
-            "python cwt.py predict --input-json data/sample.json",
-            "python cwt.py predict --input-values 'pulse_rate=75' 'blood_pressure_sys=120'",
-            "python cwt.py predict --model-type mlp --infer-missing"
-        ],
-        "options": {
-            "--input-json": "JSON file with input data",
-            "--input-values": "Input values in key=value format",
-            "--output-json": "JSON file to save prediction results",
-            "--model-type": "Type of model to use for prediction",
-            "--threshold": "Confidence threshold for prediction",
-            "--infer-missing": "Infer missing features from available data"
-        }
-    },
-    
-    "batch-predict": {
-        "description": "Batch predict cognitive workload from a CSV file",
-        "examples": [
-            "python cwt.py batch-predict --input-file data/batch_samples.csv",
-            "python cwt.py batch-predict --input-file data/samples.csv --output-file results.csv --infer-missing"
-        ],
-        "options": {
-            "--input-file": "Input CSV file with feature values",
-            "--output-file": "Output CSV file to save prediction results",
-            "--model-type": "Type of model to use for prediction",
-            "--threshold": "Confidence threshold for prediction",
-            "--infer-missing": "Infer missing features from available data"
-        }
-    },
-    
-    "time-series-predict": {
-        "description": "Predict cognitive workload from time series data",
-        "examples": [
-            "python cwt.py time-series-predict --input-file data/time_series.csv",
-            "python cwt.py time-series-predict --input-file data/series.csv --window-size 15 --step-size 5 --visualize"
-        ],
-        "options": {
-            "--input-file": "Input CSV file with time series data",
-            "--output-file": "Output CSV file to save prediction results",
-            "--window-size": "Size of sliding window in samples (default: 10)",
-            "--step-size": "Step size for sliding window (default: 5)",
-            "--model-type": "Type of model to use for prediction",
-            "--threshold": "Confidence threshold for prediction",
-            "--visualize": "Visualize time series prediction results",
-            "--infer-missing": "Infer missing features from available data"
-        }
-    }
-}
-
-def print_command_help(command=None):
-    """
-    Print help information for a specific command or all commands.
-    
-    Args:
-        command (str, optional): Command to show help for. If None, shows all commands.
-    """
-    if command and command in COMMANDS:
-        cmd_info = COMMANDS[command]
-        print(f"\n=== {command} ===")
-        print(f"{cmd_info['description']}")
-        
-        print("\nUsage examples:")
-        for example in cmd_info['examples']:
-            print(f"  {example}")
-        
-        if cmd_info['options']:
-            print("\nOptions:")
-            for option, desc in cmd_info['options'].items():
-                print(f"  {option:<20} {desc}")
-        
-    else:
-        print("\n=== CWT Tool Commands ===")
-        for cmd, info in COMMANDS.items():
-            print(f"{cmd:<20} {info['description']}")
-        print("\nUse 'python commands.py COMMAND' to get detailed help for a specific command.")
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1:
-        print_command_help(sys.argv[1])
-    else:
-        print_command_help()
-```
-
-Now, let's create a start script that automatically sets up the environment, trains models, and prepares for analysis:
-
-```python:start.py
-#!/usr/bin/env python3
-"""
-CWT Tool Startup Script
-
-This script automates the setup, model training, and preparation for 
-cognitive workload analysis. It:
-1. Sets up the CWT environment
-2. Trains all available model types
-3. Prepares sample data for analysis
-4. Generates an overview of available models and their performance
-"""
-
-import os
-import sys
-import json
-import time
-import logging
-import subprocess
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('cwt_startup.log')
-    ]
-)
-logger = logging.getLogger('cwt_startup')
-
-# Define paths
-MODEL_DIR = "models/ensemble"
-RESULTS_DIR = "results"
-REFERENCE_DATA_DIR = "data/reference"
-
-def run_command(command, desc=None):
-    """Run a shell command and log the output"""
-    if desc:
-        logger.info(f"=== {desc} ===")
-    
-    logger.info(f"Running: {command}")
-    start_time = time.time()
-    
-    try:
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        logger.info(f"Command completed successfully in {time.time() - start_time:.2f} seconds")
-        logger.debug(result.stdout)
-        return True, result.stdout
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Command failed with exit code {e.returncode}")
-        logger.error(f"Error: {e.stderr}")
-        return False, e.stderr
-
-def setup_environment():
-    """Setup the CWT environment"""
-    logger.info("Setting up CWT environment")
-    
-    # Create necessary directories
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    
-    # Run setup command
-    success, _ = run_command("python cwt.py setup", "Setting up CWT environment")
-    
-    return success
-
-def train_models():
-    """Train all available model types"""
-    logger.info("Training all model types")
-    
-    # Train all models in parallel
-    success, output = run_command(
-        f"python cwt.py train-all --output-dir {MODEL_DIR} --parallel",
-        "Training all models"
-    )
-    
-    if not success:
-        logger.warning("Full parallel training failed, attempting sequential training")
-        success, output = run_command(
-            f"python cwt.py train-all --output-dir {MODEL_DIR}",
-            "Training models sequentially"
-        )
-    
-    return success
-
-def prepare_sample_data():
-    """Prepare sample data for analysis"""
-    logger.info("Preparing sample data for analysis")
-    
-    # Create example JSON
-    success1, _ = run_command(
-        "python cwt.py predict --input-values 'pulse_rate=80' 'blood_pressure_sys=125' 'resp_rate=18' --output-json results/sample_prediction.json",
-        "Creating sample prediction"
-    )
-    
-    # Create batch prediction
-    success2, _ = run_command(
-        "python cwt.py batch-predict --input-file data/sample_missing_pupil.csv --output-file results/batch_results.csv --infer-missing",
-        "Creating batch prediction"
-    )
-    
-    # Create time series prediction
-    success3, _ = run_command(
-        "python cwt.py time-series-predict --input-file data/sample_missing_pupil.csv --output-file results/time_series_results.csv --visualize --infer-missing",
-        "Creating time series prediction"
-    )
-    
-    return all([success1, success2, success3])
-
-def generate_model_overview():
-    """Generate an overview of available models and their performance"""
-    logger.info("Generating model overview")
-    
-    # Check if ensemble metadata exists
-    metadata_path = os.path.join(MODEL_DIR, "ensemble_metadata.json")
-    if not os.path.exists(metadata_path):
-        logger.warning(f"Ensemble metadata not found at {metadata_path}")
-        return False
-    
-    try:
-        # Load metadata
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
-        
-        # Extract model results
-        results = metadata.get('results', {})
-        
-        # Convert to DataFrame
-        data = []
-        for model_type, result in results.items():
-            if "error" in result:
-                data.append({
-                    "Model Type": model_type,
-                    "Accuracy": 0.0,
-                    "F1 Score": 0.0,
-                    "Status": "Error",
-                    "Error": result["error"]
-                })
-            else:
-                data.append({
-                    "Model Type": model_type,
-                    "Accuracy": result.get("accuracy", 0.0),
-                    "F1 Score": result.get("f1_score", 0.0),
-                    "Status": "Trained",
-                    "Path": result.get("model_path", "")
-                })
-        
-        df = pd.DataFrame(data)
-        
-        # Save results to CSV
-        overview_path = os.path.join(RESULTS_DIR, "model_overview.csv")
-        df.to_csv(overview_path, index=False)
-        logger.info(f"Model overview saved to {overview_path}")
-        
-        # Generate visualization
-        plt.figure(figsize=(12, 6))
-        
-        # Only include successfully trained models
-        plot_df = df[df["Status"] == "Trained"]
-        
-        # Create bar plot
-        ax = sns.barplot(x="Model Type", y="Accuracy", data=plot_df)
-        
-        # Add F1 scores as text
-        for i, row in enumerate(plot_df.itertuples()):
-            ax.text(
-                i, row.Accuracy + 0.02, 
-                f"F1: {row.F1_Score:.3f}", 
-                ha='center', va='bottom',
-                fontweight='bold'
-            )
-        
-        plt.title("Model Performance Comparison")
-        plt.ylim(0, min(1.0, plot_df["Accuracy"].max() + 0.1))
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        
-        # Save plot
-        plot_path = os.path.join(RESULTS_DIR, "model_comparison.png")
-        plt.savefig(plot_path)
-        logger.info(f"Model comparison plot saved to {plot_path}")
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"Error generating model overview: {str(e)}")
-        return False
-
-def main():
-    """Main function to run all steps"""
-    logger.info("Starting CWT Tool automated setup")
-    
-    # Step 1: Setup environment
-    if not setup_environment():
-        logger.error("Failed to setup environment, aborting")
-        return 1
-    
-    # Step 2: Train models
-    if not train_models():
-        logger.error("Model training encountered errors, continuing with next steps")
-    
-    # Step 3: Prepare sample data
-    if not prepare_sample_data():
-        logger.error("Sample data preparation encountered errors, continuing with next steps")
-    
-    # Step 4: Generate model overview
-    if not generate_model_overview():
-        logger.error("Model overview generation encountered errors")
-    
-    logger.info("\n" + "-" * 50)
-    logger.info("CWT Tool automated setup complete")
-    logger.info("Models are now trained and ready for analysis")
-    logger.info(f"Trained models are in: {MODEL_DIR}")
-    logger.info(f"Results and visualizations are in: {RESULTS_DIR}")
-    logger.info("-" * 50)
-    
-    print("\n✅ CWT Tool is now ready for analysis!")
-    print("You can now run commands like:")
-    print("  python cwt.py predict --input-values 'pulse_rate=75' 'blood_pressure_sys=120'")
-    print("  python cwt.py batch-predict --input-file data/your_data.csv --infer-missing")
-    print("  python commands.py  # For a full list of available commands")
-    
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-Let's make the files executable:
-
-```bash
-chmod +x commands.py start.py
-```
-
-I've created two powerful tools to help you work with the Cognitive Workload Training system:
-
-1. **Commands Dictionary (`commands.py`)**
-   - A comprehensive reference of all available commands in the CWT tool
-   - Includes detailed descriptions and usage examples for each command
-   - Provides a list of all options and their explanations
-   - Can be run directly for interactive help: `python commands.py [command]`
-
-2. **Automated Start Script (`start.py`)**
-   - Automates the entire workflow from setup to analysis
-   - Sets up the CWT environment and creates necessary directories
-   - Trains all available model types (with fallback to sequential if parallel fails)
-   - Prepares sample predictions using different methods:
-     - Single point prediction
-     - Batch prediction with missing feature inference
-     - Time series prediction with visualization
-   - Generates an overview of model performance in both CSV and visual formats
-   - Provides a summary of available models and their accuracy
-
-Both scripts are now executable, so you can simply run:
-
-```bash
-./start.py
-```
-
-This will automatically set up your environment, train all models, and prepare the system for analysis. After completion, you'll have trained models ready for use and examples of predictions in the `results` directory.
-
-For help with any command, you can run:
-
-```bash:README.md
-./commands.py [command]
-```
-
-For example, `./commands.py train-all` will show you all options for training all models at once.
