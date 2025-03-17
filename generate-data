@@ -1,3 +1,4 @@
 #!/bin/bash
 # Generate sample data files for training and testing
 python utilities/generate_sample_data.py "$@"
+```

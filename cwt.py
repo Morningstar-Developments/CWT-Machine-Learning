@@ -48,21 +48,20 @@ import sys
 import json
 import logging
 import argparse
-import datetime
+from datetime import datetime
 from dotenv import load_dotenv
 import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.calibration import LabelEncoder
-from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import cross_val_score, GridSearchCV
 import matplotlib.pyplot as plt
@@ -845,11 +844,66 @@ def create_sample_input_json():
         "gaze_x", "gaze_y", "alpha_power", "theta_power"
     ]
     
-    # Add any missing features with random values
+    # Add any missing features with empirically reliable and realistic values using fuzzy logic ranges
+    empirical_ranges = {
+        "pulse_rate": (60, 100),  # Normal resting heart rate range
+        "blood_pressure_sys": (110, 130),  # Normal systolic blood pressure range
+        "resp_rate": (12, 20),  # Normal respiratory rate range
+        "pupil_diameter_left": (3.0, 4.0),  # Normal pupil diameter range in mm
+        "pupil_diameter_right": (3.0, 4.0),  # Normal pupil diameter range in mm
+        "fixation_duration": (250, 350),  # Typical fixation duration in ms
+        "blink_rate": (10, 20),  # Normal blink rate per minute
+        "workload_intensity": (40, 60),  # Assumed normal workload intensity range
+        "gaze_x": (480, 520),  # Typical gaze x-coordinate range
+        "gaze_y": (360, 390),  # Typical gaze y-coordinate range
+        "alpha_power": (8, 12),  # Typical alpha power range in EEG
+        "theta_power": (4, 8)  # Typical theta power range in EEG
+    }
+    
+    # Fuzzy logic interpretation ranges for cognitive workload assessment
+    fuzzy_interpretation = {
+        "low_workload": {
+            "pulse_rate": (55, 75),
+            "blood_pressure_sys": (100, 120),
+            "resp_rate": (10, 15),
+            "pupil_diameter_left": (2.5, 3.5),
+            "pupil_diameter_right": (2.5, 3.5),
+            "alpha_theta_ratio": (1.2, 2.0)  # Higher alpha/theta ratio indicates relaxed state
+        },
+        "medium_workload": {
+            "pulse_rate": (70, 90),
+            "blood_pressure_sys": (115, 135),
+            "resp_rate": (14, 18),
+            "pupil_diameter_left": (3.2, 4.2),
+            "pupil_diameter_right": (3.2, 4.2),
+            "alpha_theta_ratio": (0.8, 1.3)  # Balanced alpha/theta ratio
+        },
+        "high_workload": {
+            "pulse_rate": (85, 110),
+            "blood_pressure_sys": (125, 145),
+            "resp_rate": (17, 25),
+            "pupil_diameter_left": (3.8, 5.0),
+            "pupil_diameter_right": (3.8, 5.0),
+            "alpha_theta_ratio": (0.4, 0.9)  # Lower alpha/theta ratio indicates cognitive load
+        }
+    }
+    
     for feature in required_features:
         if feature not in df.columns:
-            df[feature] = np.random.normal(10, 3, 1)
-    
+            low, high = empirical_ranges[feature]
+            # Implement improved range detection with adaptive boundaries
+            range_width = high - low
+            # Use smaller expansion for narrow ranges, larger for wide ranges
+            expansion_factor = 0.05 + (0.1 * min(1.0, range_width / 100))
+            # Ensure physiologically plausible values (prevent negative values)
+            fuzzy_low = max(0, low - (expansion_factor * range_width))
+            fuzzy_high = high + (expansion_factor * range_width)
+            # Add slight randomness to the generated value to avoid uniform distributions
+            df[feature] = np.random.normal(
+                (fuzzy_low + fuzzy_high) / 2,  # mean at center of range
+                (fuzzy_high - fuzzy_low) / 6,  # std dev to keep ~99% within range
+                1
+            ).clip(fuzzy_low, fuzzy_high)  # clip to ensure within bounds
     # Convert to a dictionary (drop the cognitive_state since that's what we're predicting)
     sample_data = df.drop(columns=['cognitive_state'] if 'cognitive_state' in df.columns else []).iloc[0].to_dict()
     
@@ -2884,7 +2938,7 @@ def train_all_models(output_dir=None, parallel=False, skip_types=None):
     
     # Metadata for the ensemble of models
     metadata = {
-        "creation_date": datetime.datetime.now().isoformat(),
+        "creation_date": datetime.now().isoformat(),
         "training_data_files": DATA_FILES,
         "features": features,
         "model_types": model_types,
@@ -2997,7 +3051,7 @@ def _train_model_wrapper(args):
         
         # Save additional metadata
         metadata = {
-            "creation_date": datetime.datetime.now().isoformat(),
+            "creation_date": datetime.now().isoformat(),
             "model_type": model_type,
             "features": features,
             "accuracy": float(accuracy),
