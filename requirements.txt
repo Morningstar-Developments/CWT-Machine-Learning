@@ -7,7 +7,7 @@ seaborn==0.12.2
 tqdm==4.65.0
 python-dotenv==1.0.0
 scipy==1.10.1
-requests==2.28.2
+requests==2.32.2
 torch==2.1.2
 tensorflow==2.15.0
 xgboost==2.0.3
