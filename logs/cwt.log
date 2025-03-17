@@ -45,3 +45,29 @@ weighted avg       0.35      0.35      0.35       100
 2025-03-16 23:39:39,339 - cwt - INFO - Model training complete. Accuracy: 0.350
 2025-03-16 23:39:39,339 - cwt - INFO - Model saved at models/Cognitive_State_Prediction_Model_20250316_233938.joblib
 2025-03-16 23:39:39,339 - cwt - INFO - Scaler saved at models/scaler_20250316_233938.joblib
+2025-03-16 23:41:14,876 - cwt - INFO - Installing sample model of type: rf
+2025-03-16 23:41:14,877 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:14,888 - cwt - INFO - Creating model of type: rf (Random Forest)
+2025-03-16 23:41:15,059 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234114_rf.joblib with accuracy 0.905
+2025-03-16 23:41:15,059 - cwt - INFO - Installing sample model of type: svm
+2025-03-16 23:41:15,059 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:15,063 - cwt - INFO - Creating model of type: svm (Support Vector Machine)
+2025-03-16 23:41:15,113 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234115_svm.joblib with accuracy 0.875
+2025-03-16 23:41:15,113 - cwt - INFO - Installing sample model of type: gb
+2025-03-16 23:41:15,113 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:15,118 - cwt - INFO - Creating model of type: gb (Gradient Boosting)
+2025-03-16 23:41:15,736 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234115_gb.joblib with accuracy 0.845
+2025-03-16 23:41:15,736 - cwt - INFO - Installing sample model of type: mlp
+2025-03-16 23:41:15,736 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:15,739 - cwt - INFO - Creating model of type: mlp (Neural Network (MLP))
+2025-03-16 23:41:16,052 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234115_mlp.joblib with accuracy 0.900
+2025-03-16 23:41:16,052 - cwt - INFO - Installing sample model of type: knn
+2025-03-16 23:41:16,052 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:16,056 - cwt - INFO - Creating model of type: knn (K-Nearest Neighbors)
+2025-03-16 23:41:16,066 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234116_knn.joblib with accuracy 0.905
+2025-03-16 23:41:16,066 - cwt - INFO - Installing sample model of type: lr
+2025-03-16 23:41:16,066 - cwt - INFO - Generating synthetic data with 1000 samples and 10 features
+2025-03-16 23:41:16,070 - cwt - INFO - Creating model of type: lr (Logistic Regression)
+2025-03-16 23:41:16,081 - cwt - INFO - Sample model installed at models/Cognitive_State_Prediction_Model_20250316_234116_lr.joblib with accuracy 0.695
+2025-03-16 23:41:16,082 - cwt - INFO - Generating synthetic data with 1 samples and 10 features
+2025-03-16 23:41:16,083 - cwt - INFO - Sample input data saved to data/sample_input.json
