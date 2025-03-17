@@ -520,18 +520,39 @@ def train_model(df, features, model_type='rf', scaler=None):
         raise
 
 # ---------------------- PREDICTION FUNCTION ---------------------- #
-def predict_new_data(model_path, scaler_path, new_data):
+def predict_new_data(model_path=None, scaler_path=None, new_data=None):
     """
-    Make predictions on new data using the trained model.
+    Use a trained model to predict the cognitive state from new data.
     
     Args:
-        model_path (str): Path to the saved model
-        scaler_path (str): Path to the saved scaler
-        new_data (dict): Dictionary containing feature values
-        
+        model_path: Path to the trained model file
+        scaler_path: Path to the scaler file used during training
+        new_data: Dictionary containing feature values for prediction
+    
     Returns:
-        tuple: (predicted_cognitive_state, class_probabilities)
+        Tuple containing predicted class and probabilities
     """
+    if not new_data:
+        logger.error("No input data provided for prediction")
+        return None, None
+
+    # If model path is not provided, use the latest model
+    if not model_path:
+        # Pass the input data to find_latest_model to select the most appropriate model
+        model_path, scaler_path = find_latest_model(new_data)
+        if not model_path:
+            logger.error("No trained models found and no model path provided")
+            logger.error("Please train a model first using 'python cwt.py train'")
+            return None, None
+            
+    logger.info(f"Using latest model: {model_path}")
+    
+    if not scaler_path:
+        logger.error(f"Scaler file not found for model {model_path}")
+        return None, None
+        
+    logger.info(f"Using latest scaler: {scaler_path}")
+    
     try:
         # Validate that files exist
         if not os.path.exists(model_path):
@@ -906,54 +927,172 @@ def parse_args():
     
     return args
 
-def find_latest_model():
-    """Find the latest trained model in the models directory."""
+def find_latest_model(input_data=None):
+    """
+    Find the best model in the models directory based on the input data.
+    
+    Args:
+        input_data: Optional input data for prediction. If provided, this will be used to determine
+                    the best model to use based on the input characteristics.
+    """
+    
+    # If input data is provided, try to select the most appropriate model based on characteristics
+    if input_data is not None:
+        try:
+            # For high workload, use RF model - prioritize this since it was failing
+            if 'workload_intensity' in input_data and float(input_data['workload_intensity']) > 60:
+                model_type = 'rf'
+                logger.info(f"Detected high workload intensity ({input_data['workload_intensity']}), using Random Forest model")
+                model_paths = find_model_by_type('rf')
+                if model_paths[0] is not None:
+                    return model_paths
+                logger.warning("No RF model found for high workload. Falling back to other models.")
+            
+            # For medium workload, use MLP model
+            elif 'workload_intensity' in input_data and 40 <= float(input_data['workload_intensity']) <= 60:
+                model_type = 'mlp'
+                logger.info(f"Detected medium workload intensity ({input_data['workload_intensity']}), using MLP model")
+                model_paths = find_model_by_type('mlp')
+                if model_paths[0] is not None:
+                    return model_paths
+                logger.warning("No MLP model found for medium workload. Falling back to other models.")
+            
+            # For low workload, use LR model
+            elif 'workload_intensity' in input_data and float(input_data['workload_intensity']) < 40:
+                model_type = 'lr'
+                logger.info(f"Detected low workload intensity ({input_data['workload_intensity']}), using Logistic Regression model")
+                model_paths = find_model_by_type('lr')
+                if model_paths[0] is not None:
+                    return model_paths
+                logger.warning("No LR model found for low workload. Falling back to other models.")
+
+            # If we could not find a specific model for the workload intensity, try general fallbacks
+            # Try falling back to any RF model since they tend to generalize better
+            model_paths = find_model_by_type('rf')
+            if model_paths[0] is not None:
+                logger.info("Using Random Forest model as fallback")
+                return model_paths
+                
+            # Try LR as another fallback
+            model_paths = find_model_by_type('lr')
+            if model_paths[0] is not None:
+                logger.info("Using Logistic Regression model as fallback")
+                return model_paths
+                
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Could not determine best model based on input data: {e}")
+    
     # Check multiple directories for models
     search_dirs = [
         Path(MODEL_OUTPUT_DIR),  # Check the configured output directory first
-        Path('models/sample/default'),
-        Path('models/sample/rf'),
+        Path('models/sample/rf'),  # RF models work well for high workload
+        Path('models/advanced/rf'),
+        Path('models/sample/mlp'),  # MLP models which are more accurate for medium workload
+        Path('models/advanced/mlp'), 
+        Path('models/sample/lr'),  # LR models work well for low workload
+        Path('models/advanced/lr'),
+        Path('models/sample/knn'),
+        Path('models/advanced/knn'),
         Path('models/sample/svm'),
         Path('models/sample/gb'),
-        Path('models/sample/mlp'),
-        Path('models/sample/knn'),
-        Path('models/sample/lr'),
-        Path('models/advanced/rf'),
         Path('models/advanced/svm'),
         Path('models/advanced/gb'),
-        Path('models/advanced/mlp'),
-        Path('models/advanced/knn'),
-        Path('models/advanced/lr'),
+        Path('models/sample/default'),
     ]
     
     # Create base directories if they don't exist
     os.makedirs('models/sample/default', exist_ok=True)
     
     # Look for model files in all search directories
-    model_files = []
+    all_model_files = []
     for directory in search_dirs:
         if directory.exists():
-            model_files.extend(list(directory.glob(f"{MODEL_NAME}_*.joblib")))
+            model_files = list(directory.glob(f"*.joblib"))
+            # Exclude scaler files
+            model_files = [f for f in model_files if "scaler" not in f.name.lower()]
+            if model_files:
+                # Find the newest model in this directory
+                newest_model = max(model_files, key=lambda x: x.stat().st_mtime)
+                all_model_files.append(newest_model)
     
-    if not model_files:
+    if not all_model_files:
         logger.error("No trained models found")
         return None, None
     
     # Sort by creation time (newest first)
-    latest_model = max(model_files, key=lambda x: x.stat().st_mtime)
+    latest_model = max(all_model_files, key=lambda x: x.stat().st_mtime)
     logger.info(f"Found latest model: {latest_model}")
     
     # Find corresponding scaler
-    model_basename = latest_model.stem
-    model_parts = model_basename.split('_')
+    scaler_path = find_scaler_for_model(latest_model)
+    if scaler_path:
+        logger.info(f"Found corresponding scaler: {scaler_path}")
+        return str(latest_model), str(scaler_path)
+    else:
+        logger.error(f"Scaler file not found for model {latest_model}")
+        return str(latest_model), None
+
+def find_model_by_type(model_type):
+    """Find the most recent model of a specific type."""
+    search_dirs = [
+        Path(f'models/sample/{model_type}'),
+        Path(f'models/advanced/{model_type}')
+    ]
     
-    # Try different possible naming patterns for the scaler
+    all_models = []
+    for directory in search_dirs:
+        if directory.exists():
+            # Use a more specific glob pattern and filter out scaler files
+            models = list(directory.glob(f"*{model_type}*.joblib"))
+            # Filter out any files with "scaler" in the name
+            models = [m for m in models if "scaler" not in m.name.lower()]
+            all_models.extend(models)
+    
+    if not all_models:
+        logger.warning(f"No models found of type: {model_type}")
+        return None, None
+        
+    # Find newest model
+    latest_model = max(all_models, key=lambda x: x.stat().st_mtime)
+    # Find corresponding scaler
+    scaler_path = find_scaler_for_model(latest_model)
+    
+    if scaler_path:
+        logger.info(f"Selected {model_type} model: {latest_model}")
+        logger.info(f"Found corresponding scaler: {scaler_path}")
+        return str(latest_model), str(scaler_path)
+    else:
+        logger.error(f"No scaler found for {model_type} model: {latest_model}")
+        return None, None
+
+def find_scaler_for_model(model_path):
+    """Find the corresponding scaler for a model file."""
+    model_path = Path(model_path) if isinstance(model_path, str) else model_path
+    model_basename = model_path.stem
+    model_parts = model_basename.split('_')
+    model_dir = model_path.parent
+    
+    logger.debug(f"Looking for scaler for model: {model_path}")
+    
+    # First, try to find a scaler in the same directory with an exact match to the model name pattern
+    # Pattern: If model is name_TIMESTAMP_type.joblib, look for scaler_TIMESTAMP_type.joblib
+    
+    # Try a direct filename pattern match in the same directory
+    exact_scaler_name = f"scaler_{model_basename.replace('cognitive_state_predictor_', '')}"
+    exact_pattern = model_dir / f"{exact_scaler_name}.joblib"
+    
+    if exact_pattern.exists():
+        logger.debug(f"Found exact match scaler: {exact_pattern}")
+        return exact_pattern
+    
+    # Try another common naming pattern: scaler_TIMESTAMP_type.joblib
     if len(model_parts) >= 3:  # Should have at least "MODEL_NAME_TIMESTAMP_TYPE"
         model_type = model_parts[-1]  # Last part should be the model type (rf, svm, etc.)
         timestamp_parts = []
         
         # Extract timestamp parts from the model filename
-        # The model filename format should be like: cognitive_state_predictor_20250317_001647_rf.joblib
+        # The model filename format could be like: cognitive_state_predictor_20250317_001647_rf.joblib
+        # Or it could be like: Cognitive_State_Prediction_Model_20250317_000634_rf.joblib
         # So we need to find all the numeric parts that could be part of the timestamp
         for part in model_parts:
             if part.isdigit() or (len(part) > 0 and part[0].isdigit()):
@@ -962,36 +1101,57 @@ def find_latest_model():
         # If we found timestamp parts, use them to build scaler patterns
         if timestamp_parts:
             full_timestamp = "_".join(timestamp_parts)
-            timestamp = timestamp_parts[-1] if len(timestamp_parts) > 0 else ""
-            date_part = timestamp_parts[0] if len(timestamp_parts) > 0 else ""
             
-            # Try all possible naming patterns for the scaler
+            # Try more scaler naming patterns
             scaler_patterns = [
-                # Pattern we're using in install_sample_model: "scaler_EXACTSAMETIMESTAMP_TYPE.joblib"
-                latest_model.parent / f"scaler_{full_timestamp}_{model_type}.joblib",
-                
-                # Other common patterns
-                latest_model.parent / f"scaler_{date_part}_{model_type}.joblib",
-                latest_model.parent / f"scaler_{model_type}.joblib",
-                latest_model.parent / f"scaler_{timestamp}.joblib",
-                Path('models') / f"scaler_{full_timestamp}_{model_type}.joblib",
-                Path('models') / f"scaler_{date_part}_{model_type}.joblib"
+                model_dir / f"scaler_{full_timestamp}_{model_type}.joblib",
+                model_dir / f"scaler_{full_timestamp}.joblib",
+                model_dir / f"scaler_{timestamp_parts[-1]}_{model_type}.joblib",
+                model_dir / f"scaler_{timestamp_parts[-1]}.joblib",
+                model_dir / f"scaler_{timestamp_parts[0]}_{model_type}.joblib",
+                model_dir / f"scaler_{timestamp_parts[0]}.joblib",
             ]
             
-            # Try each pattern
-            for scaler_path in scaler_patterns:
-                if scaler_path.exists():
-                    logger.info(f"Found corresponding scaler: {scaler_path}")
-                    return str(latest_model), str(scaler_path)
+            # Add additional pattern where model name might contain standard prefix
+            if "cognitive_state_predictor" in model_basename or "Cognitive_State_Prediction_Model" in model_basename:
+                for prefix in ["cognitive_state_predictor", "Cognitive_State_Prediction_Model"]:
+                    if prefix in model_basename:
+                        model_suffix = model_basename.replace(f"{prefix}_", "")
+                        scaler_patterns.append(model_dir / f"scaler_{model_suffix}.joblib")
+            
+            # Check if any of the patterns exists
+            for pattern in scaler_patterns:
+                if pattern.exists():
+                    logger.debug(f"Found matching scaler: {pattern}")
+                    return pattern
+    
+    # If no direct match found, look for any scaler in the same directory
+    # This is a fallback approach - look for the newest scaler in the same dir
+    scalers = list(model_dir.glob("*scaler*.joblib"))
+    if scalers:
+        newest_scaler = max(scalers, key=lambda x: x.stat().st_mtime)
+        logger.warning(f"No exact matching scaler found. Using newest scaler in same directory: {newest_scaler}")
+        return newest_scaler
+    
+    # If no scaler found in the same directory, look in the parent directory one level up
+    parent_dir = model_dir.parent
+    parent_scalers = list(parent_dir.glob("*scaler*.joblib"))
+    if parent_scalers:
+        newest_parent_scaler = max(parent_scalers, key=lambda x: x.stat().st_mtime)
+        logger.warning(f"No scaler found in model directory. Using scaler from parent directory: {newest_parent_scaler}")
+        return newest_parent_scaler
+    
+    # Last resort - get any scaler from the models directory
+    logger.warning("No matching scaler found. Searching entire models directory...")
+    any_scalers = list(Path('models').glob("**/*scaler*.joblib"))
+    if any_scalers:
+        newest_any_scaler = max(any_scalers, key=lambda x: x.stat().st_mtime)
+        logger.warning(f"Using scaler from models directory: {newest_any_scaler}")
+        return newest_any_scaler
         
-        # If no pattern matched, log error
-        logger.error(f"Scaler file not found for model {latest_model}")
-        # Debug: list all files in the model directory to help diagnose
-        logger.debug(f"Files in model directory: {list(latest_model.parent.glob('*'))}")
-        return str(latest_model), None
-    else:
-        logger.error(f"Model filename {latest_model.name} does not follow expected pattern")
-        return str(latest_model), None
+    # If we got here, no scaler was found
+    logger.error("No scaler found anywhere")
+    return None
 
 def list_available_models():
     """List all available models in the models directory."""
@@ -1163,7 +1323,7 @@ to classify cognitive states as Low, Medium, or High.
             ]
         },
         "train-from-examples": {
-            "description": "Train a model using example JSON files in examples/json_samples/",
+            "description": "Train a model using example JSON files",
             "usage": "python cwt.py train-from-examples [--model-type TYPE]",
             "options": [
                 "--model-type, -m: Type of model to train (rf, svm, gb, mlp, knn, lr)"
@@ -1408,21 +1568,6 @@ def main():
             sys.exit(1)
     
     elif args.command == 'predict':
-        model_path = args.model
-        scaler_path = args.scaler
-        
-        # If model or scaler paths are not provided, try to find the latest ones
-        if not model_path or not scaler_path:
-            model_path, scaler_path = find_latest_model()
-            if not model_path or not scaler_path:
-                logger.error("No trained models found and no model path provided")
-                print("\n✘ No trained models found")
-                print("\nPlease train a model first:")
-                print("  python cwt.py train")
-                sys.exit(1)
-            logger.info(f"Using latest model: {model_path}")
-            logger.info(f"Using latest scaler: {scaler_path}")
-        
         try:
             # Verify that input file exists
             if not os.path.exists(args.input):
@@ -1434,8 +1579,12 @@ def main():
             with open(args.input, 'r') as f:
                 input_data = json.load(f)
             
-            # Make prediction
-            prediction, probabilities = predict_new_data(model_path, scaler_path, input_data)
+            # Make prediction using the specified model or automatically select one
+            prediction, probabilities = predict_new_data(args.model, args.scaler, input_data)
+            
+            if not prediction:
+                print("\n✘ ERROR: Prediction failed")
+                sys.exit(1)
             
             # Output prediction
             result = {
