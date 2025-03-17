@@ -10,11 +10,13 @@ Available commands:
     train       - Train a new model
     predict     - Make predictions with a trained model
     list-models - List available trained models
+    install-models - Install sample pre-trained models
 
 Example usage:
     python cwt.py train --model-type rf
     python cwt.py predict --input input_data.json
     python cwt.py list-models
+    python cwt.py install-models
 
 Available model types:
     rf  - Random Forest
@@ -23,6 +25,22 @@ Available model types:
     mlp - Neural Network (MLP)
     knn - K-Nearest Neighbors
     lr  - Logistic Regression
+
+SIMPLE COMMANDS:
+
+  Train a model:
+    python cwt.py train
+
+  Make predictions:
+    python cwt.py predict --input data.json
+
+  List available models:
+    python cwt.py list-models
+
+  Install sample models:
+    python cwt.py install-models
+
+Type 'python cwt.py train --help' for more options.
 """
 
 import os
@@ -49,6 +67,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 from dotenv import load_dotenv
+from sklearn.datasets import make_classification
+from sklearn.preprocessing import LabelEncoder
 
 # Load environment variables if .env file exists
 if os.path.exists('.env'):
@@ -80,10 +100,8 @@ DATA_FILES = {
     "gaze": os.getenv('GAZE_DATA_PATH', 'data/008_01.csv')
 }
 
-# Check if data directories exist and create them if not
-os.makedirs(os.path.dirname(DATA_FILES["physiological"]), exist_ok=True)
-os.makedirs(os.path.dirname(DATA_FILES["eeg"]), exist_ok=True)
-os.makedirs(os.path.dirname(DATA_FILES["gaze"]), exist_ok=True)
+# Create the data directory if it doesn't exist
+os.makedirs('data', exist_ok=True)
 
 # Log data file paths for debugging
 logger.debug(f"Physiological data file path: {DATA_FILES['physiological']}")
@@ -123,7 +141,7 @@ def validate_file_exists(file_path):
     if not os.path.exists(file_path):
         error_msg = f"File not found: {file_path}"
         logger.error(error_msg)
-        print(f"\nERROR: {error_msg}")
+        print(f"\n✘ ERROR: {error_msg}")
         print("Please check if the file exists or update your configuration.")
         raise FileNotFoundError(error_msg)
     return True
@@ -201,6 +219,19 @@ def load_data():
     """
     logger.info("Loading data files...")
     try:
+        # Check if data files exist before proceeding
+        for data_type, file_path in DATA_FILES.items():
+            if not os.path.exists(file_path):
+                logger.error(f"{data_type.capitalize()} data file not found: {file_path}")
+                print(f"\n✘ Data file missing: {file_path}")
+                print("\nSince real data is missing, you have two options:")
+                print("  1. Run 'python cwt.py install-models' to install sample models")
+                print("  2. Create a 'data' folder with the required files")
+                print("     or modify paths in your .env file")
+                print("\nRecommended action:")
+                print("  python cwt.py install-models")
+                sys.exit(1)
+        
         df_physio = safe_read_csv(DATA_FILES["physiological"])
         df_eeg = safe_read_csv(DATA_FILES["eeg"])
         df_gaze = safe_read_csv(DATA_FILES["gaze"])
@@ -496,6 +527,205 @@ def predict_new_data(model_path, scaler_path, new_data):
         logger.error(f"Error during prediction: {str(e)}")
         raise
 
+# ---------------------- SAMPLE MODEL GENERATION ---------------------- #
+def generate_synthetic_data(n_samples=1000, n_features=10, random_state=42):
+    """
+    Generate synthetic data for training sample models.
+    
+    Args:
+        n_samples (int): Number of samples to generate
+        n_features (int): Number of features to generate
+        random_state (int): Random seed for reproducibility
+        
+    Returns:
+        tuple: (X, y)
+    """
+    logger.info(f"Generating synthetic data with {n_samples} samples and {n_features} features")
+    
+    # Generate synthetic data
+    X, y = make_classification(
+        n_samples=n_samples,
+        n_features=n_features,
+        n_informative=n_features-2,
+        n_redundant=2,
+        n_classes=3,
+        weights=[0.3, 0.3, 0.4],
+        random_state=random_state
+    )
+    
+    # Convert to DataFrame with feature names similar to the expected ones
+    feature_names = [
+        "pulse_rate", "blood_pressure_sys", "resp_rate", "pupil_diameter_left",
+        "pupil_diameter_right", "fixation_duration", "blink_rate", "gaze_x", "gaze_y", "theta_power"
+    ]
+    
+    # Ensure we use only the number of features we have names for
+    n_actual_features = min(n_features, len(feature_names))
+    X = X[:, :n_actual_features]
+    
+    df = pd.DataFrame(X, columns=feature_names[:n_actual_features])
+    
+    # Add workload_intensity and cognitive_state based on the generated y
+    df['workload_intensity'] = y * 30 + 50  # Convert to a range around 50-140
+    
+    # Convert numeric y to Low/Medium/High
+    le = LabelEncoder()
+    le.fit(['Low', 'Medium', 'High'])
+    df['cognitive_state'] = le.inverse_transform(y)
+    
+    return df
+
+def create_sample_input_json():
+    """Create a sample JSON file with input data for prediction."""
+    # Generate a single sample of synthetic data
+    df = generate_synthetic_data(n_samples=1, random_state=RANDOM_SEED)
+    
+    # Convert to a dictionary (drop the cognitive_state since that's what we're predicting)
+    sample_data = df.drop(columns=['cognitive_state']).iloc[0].to_dict()
+    
+    # Round values to 2 decimal places for readability
+    sample_data = {k: round(v, 2) if isinstance(v, (float, np.float64)) else v 
+                 for k, v in sample_data.items()}
+    
+    # Save to a file
+    sample_path = 'data/sample_input.json'
+    os.makedirs(os.path.dirname(sample_path), exist_ok=True)
+    
+    with open(sample_path, 'w') as f:
+        json.dump(sample_data, f, indent=2)
+    
+    logger.info(f"Sample input data saved to {sample_path}")
+    return sample_path
+
+def install_sample_model(model_type, model_name_suffix="", random_state=None):
+    """
+    Train and install a sample model of the specified type.
+    
+    Args:
+        model_type (str): Type of model to create
+        model_name_suffix (str): Suffix to add to the model name
+        random_state (int): Random seed for reproducibility
+        
+    Returns:
+        tuple: (model_path, accuracy)
+    """
+    if random_state is None:
+        random_state = RANDOM_SEED
+    
+    # Set up unique version for this model
+    model_version = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{model_type}{model_name_suffix}"
+    model_path = os.path.join(MODEL_OUTPUT_DIR, f"{MODEL_NAME}_{model_version}.joblib")
+    scaler_path = os.path.join(MODEL_OUTPUT_DIR, f"scaler_{model_version}.joblib")
+    metadata_path = os.path.join(MODEL_OUTPUT_DIR, f"metadata_{model_version}.json")
+    
+    logger.info(f"Installing sample model of type: {model_type}")
+    
+    try:
+        # Generate synthetic data
+        df = generate_synthetic_data(random_state=random_state)
+        
+        # Create a scaler and fit it to the data
+        scaler = StandardScaler()
+        features = [col for col in df.columns if col not in ['cognitive_state', 'workload_intensity']]
+        df[features] = scaler.fit_transform(df[features])
+        
+        # Split the data for training and testing
+        X = df.drop(columns=["cognitive_state", "workload_intensity"])
+        y = df["cognitive_state"]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, stratify=y, random_state=random_state
+        )
+        
+        # Create and train the model
+        model = create_model(model_type)
+        model.fit(X_train, y_train)
+        
+        # Calculate accuracy
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        class_report = classification_report(y_test, y_pred, output_dict=True)
+        
+        # Save the model and scaler
+        joblib.dump(model, model_path)
+        joblib.dump(scaler, scaler_path)
+        
+        # Create metadata
+        metadata = {
+            "model_version": model_version,
+            "model_type": model_type,
+            "model_name": AVAILABLE_MODELS.get(model_type, "Unknown"),
+            "training_date": datetime.now().isoformat(),
+            "accuracy": float(accuracy),
+            "classification_report": class_report,
+            "features": list(X.columns),
+            "parameters": {
+                "test_size": 0.2,
+                "random_seed": random_state
+            },
+            "note": "This is a sample model trained on synthetic data for demonstration purposes."
+        }
+        
+        # Save metadata
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
+        
+        logger.info(f"Sample model installed at {model_path} with accuracy {accuracy:.3f}")
+        return model_path, accuracy
+        
+    except Exception as e:
+        logger.error(f"Error installing sample model: {str(e)}")
+        raise
+
+def install_sample_models():
+    """Install a set of sample models for different algorithm types."""
+    # Ensure model directory exists
+    os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+    
+    print("\n" + "="*50)
+    print("Installing sample models...")
+    print("="*50)
+    
+    results = []
+    
+    # Install one of each type of model
+    for i, (model_type, model_name) in enumerate(AVAILABLE_MODELS.items()):
+        try:
+            # Use different random seeds for variety
+            random_seed = RANDOM_SEED + i
+            
+            print(f"Installing {model_name}...")
+            model_path, accuracy = install_sample_model(model_type, random_state=random_seed)
+            
+            results.append({
+                "type": model_type,
+                "name": model_name,
+                "accuracy": accuracy,
+                "path": model_path
+            })
+            
+            print(f"✓ {model_name} installed (accuracy: {accuracy:.3f})")
+            print("-" * 50)
+            
+        except Exception as e:
+            print(f"✘ Failed to install {model_name}: {str(e)}")
+    
+    # Create a sample input file for predictions
+    sample_path = create_sample_input_json()
+    
+    print("\n" + "="*50)
+    print(f"✓ INSTALLATION COMPLETE: {len(results)} models installed")
+    print("="*50)
+    print("\nAvailable models:")
+    for result in sorted(results, key=lambda x: x["accuracy"], reverse=True):
+        print(f"  - {result['name']:<20} (accuracy: {result['accuracy']:.3f})")
+    
+    print(f"\nSample input data created at: {sample_path}")
+    print("\nTo make predictions with these models, run:")
+    print(f"  python cwt.py predict --input {sample_path}")
+    print("\nTo see all installed models:")
+    print("  python cwt.py list-models")
+    print("="*50)
+
 # ---------------------- COMMAND LINE INTERFACE ---------------------- #
 def parse_args():
     """Parse command line arguments."""
@@ -517,11 +747,14 @@ def parse_args():
     # List models command
     list_parser = subparsers.add_parser('list-models', help='List available trained models')
     
+    # Install models command
+    install_parser = subparsers.add_parser('install-models', help='Install sample pre-trained models')
+    
     # Handle case where no command is provided
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
-        parser.exit(1, "Error: No command specified. Use 'train', 'predict', or 'list-models'.\n")
+        parser.exit(1, "Error: No command specified. Use 'train', 'predict', 'list-models', or 'install-models'.\n")
     
     return args
 
@@ -583,21 +816,19 @@ def list_available_models():
     model_files = list(models_path.glob(f"{MODEL_NAME}_*.joblib"))
     
     if not model_files:
-        print("\nNo trained models found.")
-        print("Train a model first with:")
-        print("  python cwt.py train --model-type MODEL_TYPE")
+        print("\n✘ No trained models found")
+        print("\nTo train a new model, run:")
+        print("  python cwt.py train")
+        print("  python cwt.py train --model-type rf")
         logger.info("No trained models found")
         return
     
-    print("\nAvailable trained models:")
-    print("-" * 100)
-    print(f"{'Model Name':<50} {'Model Type':<15} {'Accuracy':<10} {'Creation Date':<20} {'Size (KB)':<10}")
-    print("-" * 100)
+    print("\n✓ Available trained models:")
+    print("-" * 80)
+    print(f"{'Model Name':<50} {'Model Type':<15} {'Accuracy':<10}")
+    print("-" * 80)
     
     for model_file in sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True):
-        creation_time = datetime.fromtimestamp(model_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        size_kb = model_file.stat().st_size / 1024
-        
         # Try to get model type and accuracy from metadata
         model_type = "Unknown"
         accuracy = "N/A"
@@ -617,18 +848,16 @@ def list_available_models():
         except Exception as e:
             logger.warning(f"Error reading metadata for {model_file.name}: {str(e)}")
         
-        print(f"{model_file.name:<50} {model_type:<15} {accuracy:<10} {creation_time:<20} {size_kb:.2f}")
+        print(f"{model_file.name:<50} {model_type:<15} {accuracy:<10}")
     
-    print("\nEXAMPLE COMMANDS:")
-    print("\nTo use a model for prediction:")
+    print("\nTo make predictions, run:")
     print("  python cwt.py predict --input YOUR_DATA.json")
-    print("  python cwt.py predict --input YOUR_DATA.json --model PATH_TO_MODEL --scaler PATH_TO_SCALER")
-    print("\nTo train a new model:")
-    for model_key, model_name in AVAILABLE_MODELS.items():
-        print(f"  python cwt.py train --model-type {model_key}")
-    print("\nAvailable model types:")
-    for model_key, model_name in AVAILABLE_MODELS.items():
-        print(f"  {model_key} - {model_name}")
+    
+    print("\nTo train a new model, run one of:")
+    for i, (model_key, model_name) in enumerate(AVAILABLE_MODELS.items()):
+        if i < 3:  # Only show a few examples to keep it simple
+            print(f"  python cwt.py train --model-type {model_key}")
+    print("  (see all options with: python cwt.py train --help)")
 
 # ---------------------- MAIN EXECUTION ---------------------- #
 def main():
@@ -647,8 +876,13 @@ def main():
             for data_type, file_path in DATA_FILES.items():
                 if not os.path.exists(file_path):
                     logger.error(f"{data_type.capitalize()} data file not found: {file_path}")
-                    print(f"\nERROR: {data_type.capitalize()} data file not found at: {file_path}")
-                    print("Please ensure your data files are in the correct location or update your .env file with the correct paths.")
+                    print(f"\n✘ Data file missing: {file_path}")
+                    print("\nSince real data is missing, you have two options:")
+                    print("  1. Run 'python cwt.py install-models' to install sample models")
+                    print("  2. Create a 'data' folder with the required files")
+                    print("     or modify paths in your .env file")
+                    print("\nRecommended action:")
+                    print("  python cwt.py install-models")
                     sys.exit(1)
             
             # Load data
@@ -669,17 +903,15 @@ def main():
             logger.info(f"Scaler saved at {SCALER_OUTPUT_PATH}")
             
             # Print summary to console
-            print("\n" + "="*60)
-            print(f"MODEL TRAINING SUCCESSFULLY COMPLETED")
-            print("="*60)
+            print("\n" + "="*50)
+            print(f"✓ MODEL TRAINING COMPLETE")
+            print("="*50)
             print(f"Model Type: {AVAILABLE_MODELS.get(model_type, 'Unknown')}")
             print(f"Accuracy:   {accuracy:.3f}")
-            print(f"Model Path: {MODEL_OUTPUT_PATH}")
-            print(f"Scaler Path: {SCALER_OUTPUT_PATH}")
             
-            print("\nTo make predictions with this model, run:")
+            print("\nTo make predictions, run:")
             print(f"  python cwt.py predict --input YOUR_DATA.json")
-            print("="*60)
+            print("="*50)
             
         except Exception as e:
             logger.error(f"Training pipeline failed: {str(e)}")
@@ -695,11 +927,9 @@ def main():
             model_path, scaler_path = find_latest_model()
             if not model_path or not scaler_path:
                 logger.error("No trained models found and no model path provided")
-                print("\nERROR: No trained models found in the models directory.")
-                print("Please train a model first using the 'train' command:")
+                print("\n✘ No trained models found")
+                print("\nPlease train a model first:")
                 print("  python cwt.py train")
-                print("\nOr specify a model and scaler path explicitly:")
-                print("  python cwt.py predict --input data.json --model path/to/model.joblib --scaler path/to/scaler.joblib")
                 sys.exit(1)
             logger.info(f"Using latest model: {model_path}")
             logger.info(f"Using latest scaler: {scaler_path}")
@@ -708,7 +938,7 @@ def main():
             # Verify that input file exists
             if not os.path.exists(args.input):
                 logger.error(f"Input file not found: {args.input}")
-                print(f"\nERROR: Input file not found: {args.input}")
+                print(f"\n✘ ERROR: Input file not found: {args.input}")
                 sys.exit(1)
             
             # Load input data
@@ -719,12 +949,14 @@ def main():
             prediction, probabilities = predict_new_data(model_path, scaler_path, input_data)
             
             # Output prediction
-            print("\nPrediction Results:")
-            print("-" * 50)
+            print("\n" + "="*50)
+            print(f"✓ PREDICTION RESULTS")
+            print("="*50)
             print(f"Predicted Cognitive State: {prediction}")
-            print("\nClass Probabilities:")
+            print("\nProbabilities:")
             for cls, prob in probabilities.items():
-                print(f"  {cls}: {prob:.4f}")
+                print(f"  {cls:<10}: {prob:.2f}")
+            print("="*50)
             
         except Exception as e:
             logger.error(f"Prediction failed: {str(e)}")
@@ -734,9 +966,12 @@ def main():
     elif args.command == 'list-models':
         list_available_models()
     
+    elif args.command == 'install-models':
+        install_sample_models()
+    
     else:
         logger.error(f"Unknown command: {args.command}")
-        logger.error("Use 'train', 'predict', or 'list-models'.")
+        logger.error("Use 'train', 'predict', 'list-models', or 'install-models'.")
         sys.exit(1)
 
 if __name__ == "__main__":
