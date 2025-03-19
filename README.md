@@ -2,6 +2,9 @@
 
 ![License](https://badge.ttsalpha.com/api?icon=meta&label=License&status=MIT&color=pink&labelColor=black&iconColor=pink)
 
+![Machine Learning](https://badge.ttsalpha.com/api?icon=huggingface&label=Machine Learning&status=📶Loading…&color=yellow&labelColor=black&iconColor=yellow)
+
+
 A comprehensive tool for training machine learning models to detect and classify cognitive workload levels based on physiological and behavioral metrics.
 
 ## Features
