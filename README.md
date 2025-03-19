@@ -1,5 +1,7 @@
 # Cognitive Workload Training (CWT) Tool
 
+![License](https://badge.ttsalpha.com/api?icon=meta&label=License&status=MIT&color=pink&labelColor=black&iconColor=pink)
+
 A comprehensive tool for training machine learning models to detect and classify cognitive workload levels based on physiological and behavioral metrics.
 
 ## Features
